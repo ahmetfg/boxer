@@ -1,5 +1,5 @@
 // src/components/ThreeScene.jsx
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import addPositionSlidersToGUI, * as utils from './Utils.tsx';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader';
@@ -28,6 +28,8 @@ let fireWeight = 0;   // anlık ağırlık
 let fireTarget = 0;   // hedef ağırlık (0 veya 1)
 const FIRE_LERP_K = 20;   // hız katsayısı (büyüdükçe daha hızlı)
 
+var targetBox
+
 // Kontrol için bir ayarlar nesnesi oluşturalım
 const settings = {
     transitionX: 0.0, // 0'dan 1'e kadar gidecek slider değeri
@@ -40,7 +42,15 @@ export default function ThreeScene() {
     const [isRunning, setIsRunning] = useState(false);
     const [isFiring, setIsFiring] = useState(false);
     const isRunningRef = useRef(isRunning);
+    // References to core Three.js objects
+    const sceneRef = useRef<THREE.Scene>(null);
+    const cameraRef = useRef<THREE.PerspectiveCamera>(null);
+    const rendererRef = useRef<THREE.WebGLRenderer>(null);
+
     useEffect(() => { isRunningRef.current = isRunning; }, [isRunning]);
+    // Raycaster for hitscan
+    const raycaster = useRef(new THREE.Raycaster());
+    const pointer = useRef(new THREE.Vector2(0, 0)); // center of screen
 
     useEffect(() => {
         settings.transitionX = joystickCoords.x;
@@ -48,6 +58,7 @@ export default function ThreeScene() {
 
         moveCharacter(joystickCoords, player, isRunning ? 3 : 1.3, deltaTime)
     }, [joystickCoords])
+    
     function moveCharacter(joystick, mesh, baseMoveSpeed, deltaTime) {
         const { x, y } = joystick;
         const inputMagnitude = Math.hypot(x, y);
@@ -74,7 +85,6 @@ export default function ThreeScene() {
         );
     }
 
-
     useEffect(() => {
         const mount = mountRef.current;
         // Cleanup any existing canvas
@@ -82,18 +92,21 @@ export default function ThreeScene() {
 
         // Scene setup
         const scene = new THREE.Scene();
+        sceneRef.current = scene
         const camera = new THREE.PerspectiveCamera(
             60,
             mount.clientWidth / mount.clientHeight,
             0.1,
             1000
         );
+        cameraRef.current = camera;
         camera.rotation.set(-3, 0, 3.14);
         camera.position.set(-1.03, 1.3, -1.2);
         const renderer = new THREE.WebGLRenderer({
             antialias: false,
             // alpha: true 
         });
+        rendererRef.current = renderer;
         renderer.setClearColor(0x000000, 0);
         renderer.setSize(mount.clientWidth, mount.clientHeight);
         mount.appendChild(renderer.domElement);
@@ -120,6 +133,12 @@ export default function ThreeScene() {
         // Target
         const aimTarget = utils.AddSphere(aimSphere, .1, null)
         aimTarget.position.z = 10
+
+        targetBox = utils.AddSphere(scene, .2, "grey")
+        
+        targetBox.position.x = 3 
+        targetBox.position.y = 1 
+        targetBox.position.z = 2 
 
         // GUI setup
         const gui = new GUI({ width: 300 });
@@ -227,8 +246,6 @@ export default function ThreeScene() {
                 scene.add(model);
                 // const n = new THREE.SkeletonHelper(model)
                 // scene.add(n);
-
-
 
                 // Animation mixer
                 mixer = new THREE.AnimationMixer(model);
@@ -392,11 +409,7 @@ export default function ThreeScene() {
                     // camera.position.add(new THREE.Vector3(mount.clientWidth < 1000 ? -.5 : -1, 1.381, -1.9));
 
 
-                } else {
-                    console.log("no rightHand")
                 }
-            } else {
-                console.log("no rifle")
             }
 
             idleAction?.setEffectiveWeight(getIdleWeight(settings.transitionX, settings.transitionY));
@@ -462,8 +475,10 @@ export default function ThreeScene() {
             //controls.dispose();
             renderer.dispose();
             if (mount) mount.innerHTML = '';
+            mountRef?.current?.removeChild(renderer.domElement)
         };
     }, []);
+
     // disable loupe
     useEffect(() => {
         const handleTouchMove = (e) => {
@@ -487,6 +502,38 @@ export default function ThreeScene() {
             document.removeEventListener("touchstart", handleTouchMove)
         }
     }, [])
+
+    // Shoot function using raycast
+    const shoot = useCallback(() => {
+        const scene = sceneRef.current!;
+        const camera = cameraRef.current!;
+        pointer.current.set(0, 0);
+        raycaster.current.setFromCamera(pointer.current, camera);
+        const intersects = raycaster.current.intersectObjects(scene.children, true);
+        if (intersects.length > 0) {
+            const hit = intersects[0];
+            // istediğin yarıçap
+            const radius = 5;
+
+            // rastgele açı ve mesafe seç
+            const angle = Math.random() * Math.PI * 2;
+            const distance = Math.random() * radius;
+
+            // yeni X,Z konumlarını hesapla
+            const newX = Math.cos(angle) * distance;
+            const newZ = Math.sin(angle) * distance;
+
+            // Y eksenini yer altında kalmayacak şekilde orijinal yüksekliğe ya da 0’a sabitle
+            const newY = Math.max(hit.point.y, 1);
+
+            // taşı
+            hit.object.position.set(newX, newY, newZ);
+            // console.log('Ray hit object:', hit.object, 'at point', hit.point);
+            // sceneRef.current?.remove(hit.object);
+
+            // e.g. apply damage: hit.object.userData.takeDamage?.(10);
+        }
+    }, []);
 
     return <div
         // style={{ position: 'fixed', width: '100vw', height: '100vh', overflow: 'hidden' }}
@@ -522,7 +569,7 @@ export default function ThreeScene() {
         <div style={{
             position: 'fixed',
             bottom: 'calc(var(--vvw) * 0.05 + env(safe-area-inset-bottom))',
-            left: 'calc(var(--vvw) * 0.13 + env(safe-area-inset-left))',
+            left: 'calc(var(--vvw) * 0.05 + env(safe-area-inset-left))',
             zIndex: 10
         }}>
             <Joystick onChange={setJoystickCoords} />
@@ -572,6 +619,7 @@ export default function ThreeScene() {
                 touchAction: 'none'
             }}
             onPointerDown={() => {
+                shoot()
                 fireTarget = 1;        // hedef  → 1
                 setIsFiring(true);
                 muzzle.play();
