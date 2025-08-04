@@ -13,6 +13,7 @@ var player: THREE.Object3D;
 var deltaTime;
 var idleFireAction: THREE.AnimationAction;
 var idleAction: THREE.AnimationAction;
+var idleChrouchAction: THREE.AnimationAction;
 
 var walkBackAction: THREE.AnimationAction;
 var walkForwardAction: THREE.AnimationAction;
@@ -23,6 +24,12 @@ var runBackAction: THREE.AnimationAction;
 var runForwardAction: THREE.AnimationAction;
 var runLeftAction: THREE.AnimationAction;
 var runRightAction: THREE.AnimationAction;
+
+var chrouchBackAction: THREE.AnimationAction;
+var chrouchForwardAction: THREE.AnimationAction;
+var chrouchLeftAction: THREE.AnimationAction;
+var chrouchRightAction: THREE.AnimationAction;
+
 var muzzle: utils.MuzzleFlashAnimator
 let fireWeight = 0;   // anlık ağırlık
 let fireTarget = 0;   // hedef ağırlık (0 veya 1)
@@ -41,13 +48,16 @@ export default function ThreeScene() {
     const [joystickCoords, setJoystickCoords] = useState({ x: 0, y: 0 });
     const [isRunning, setIsRunning] = useState(false);
     const [isFiring, setIsFiring] = useState(false);
+    const [isChrouching, setIsChrouching] = useState(false);
     const isRunningRef = useRef(isRunning);
+    const isChrouchingRef = useRef(isChrouching);
     // References to core Three.js objects
     const sceneRef = useRef<THREE.Scene>(null);
     const cameraRef = useRef<THREE.PerspectiveCamera>(null);
     const rendererRef = useRef<THREE.WebGLRenderer>(null);
-
+ 
     useEffect(() => { isRunningRef.current = isRunning; }, [isRunning]);
+    useEffect(() => { isChrouchingRef.current = isChrouching; }, [isChrouching]);
     // Raycaster for hitscan
     const raycaster = useRef(new THREE.Raycaster());
     const pointer = useRef(new THREE.Vector2(0, 0)); // center of screen
@@ -135,7 +145,7 @@ export default function ThreeScene() {
         aimTarget.position.z = 10
 
         targetBox = utils.AddSphere(scene, .2, "grey")
-        
+        targetBox.name = "targetObject";
         targetBox.position.x = 3 
         targetBox.position.y = 1 
         targetBox.position.z = 2 
@@ -253,6 +263,7 @@ export default function ThreeScene() {
                 // idleAction = mixer.clipAction(gltf.animations[2]);
                 idleAction = mixer.clipAction(gltf.animations.find(clip => clip.name === 'Idle'));
                 idleFireAction = mixer.clipAction(gltf.animations.find(clip => clip.name === 'IdleFire'));
+                idleChrouchAction = mixer.clipAction(gltf.animations.find(clip => clip.name === 'IdleCrouch'));
 
                 const idleFireUpperClip = utils.clipOnlyUpperBody(idleFireAction.getClip());   // ← yeni
                 const idleFireUpperAction = mixer.clipAction(idleFireUpperClip);     // ← yeni
@@ -276,8 +287,14 @@ export default function ThreeScene() {
                 runLeftAction = mixer.clipAction(gltf.animations.find(clip => clip.name === 'RunLeft'));//3
                 runRightAction = mixer.clipAction(gltf.animations.find(clip => clip.name === 'RunRight'));//4
 
+                chrouchBackAction = mixer.clipAction(gltf.animations.find(clip => clip.name === 'BackCrouch'));//0
+                chrouchForwardAction = mixer.clipAction(gltf.animations.find(clip => clip.name === 'ForwardCrouch'));//1
+                chrouchLeftAction = mixer.clipAction(gltf.animations.find(clip => clip.name === 'LeftCrouch'));//3
+                chrouchRightAction = mixer.clipAction(gltf.animations.find(clip => clip.name === 'RightCrouch'));//4
+
                 idleAction.setEffectiveWeight(0)
                 idleFireAction.setEffectiveWeight(0)
+                idleChrouchAction.setEffectiveWeight(0)
 
                 walkBackAction.setEffectiveWeight(0)
                 walkForwardAction.setEffectiveWeight(0)
@@ -289,15 +306,20 @@ export default function ThreeScene() {
                 runLeftAction.setEffectiveWeight(0)
                 runRightAction.setEffectiveWeight(0)
 
+                chrouchBackAction.setEffectiveWeight(0)
+                chrouchForwardAction.setEffectiveWeight(0)
+                chrouchLeftAction.setEffectiveWeight(0)
+                chrouchRightAction.setEffectiveWeight(0)
+
                 idleFireAction.setEffectiveTimeScale(2)
                 walkForwardAction.setEffectiveTimeScale(1.5)
                 walkBackAction.setEffectiveTimeScale(1.5)
-
                 runForwardAction.setEffectiveTimeScale(1.3)
                 runRightAction.setEffectiveTimeScale(.8)
 
                 idleAction.play()
                 idleFireAction.play()
+                idleChrouchAction.play()
                 walkBackAction.play()
                 walkForwardAction.play()
                 walkLeftAction.play()
@@ -307,6 +329,11 @@ export default function ThreeScene() {
                 runForwardAction.play();
                 runLeftAction.play();
                 runRightAction.play();
+
+                chrouchBackAction.play();
+                chrouchForwardAction.play();
+                chrouchLeftAction.play();
+                chrouchRightAction.play();
 
                 rifle = model.getObjectByName("Rifle") as THREE.Object3D;
 
@@ -411,28 +438,34 @@ export default function ThreeScene() {
 
                 }
             }
-
-            idleAction?.setEffectiveWeight(getIdleWeight(settings.transitionX, settings.transitionY));
-
-            if (isRunningRef.current) {
+             
+            if (isChrouchingRef.current) {
+                if (idleAction?.getEffectiveWeight()>= .9) {
+                    idleAction.fadeOut(.2)
+                }
                 // yürüyüşü sıfırla
                 walkLeftAction?.setEffectiveWeight(0);
                 walkRightAction?.setEffectiveWeight(0);
                 walkBackAction?.setEffectiveWeight(0);
                 walkForwardAction?.setEffectiveWeight(0);
                 // idleAction?.setEffectiveWeight(0);
-                // koşu animasyonları
-                runLeftAction?.setEffectiveWeight(-THREE.MathUtils.clamp(settings.transitionX, -1, 0));
-                runRightAction?.setEffectiveWeight(THREE.MathUtils.clamp(settings.transitionX, 0, 1));
-                runBackAction?.setEffectiveWeight(-THREE.MathUtils.clamp(settings.transitionY, -1, 0));
-                runForwardAction?.setEffectiveWeight(THREE.MathUtils.clamp(settings.transitionY, 0, 1));
-            } else {
-                spineController?.update();
 
-                runLeftAction?.setEffectiveWeight(0);
-                runRightAction?.setEffectiveWeight(0);
-                runBackAction?.setEffectiveWeight(0);
-                runForwardAction?.setEffectiveWeight(0);
+                // koşu animasyonları
+                chrouchLeftAction?.setEffectiveWeight(-THREE.MathUtils.clamp(settings.transitionX, -1, 0));
+                chrouchRightAction?.setEffectiveWeight(THREE.MathUtils.clamp(settings.transitionX, 0, 1));
+                chrouchBackAction?.setEffectiveWeight(-THREE.MathUtils.clamp(settings.transitionY, -1, 0));
+                chrouchForwardAction?.setEffectiveWeight(THREE.MathUtils.clamp(settings.transitionY, 0, 1));
+                idleChrouchAction?.setEffectiveWeight(getIdleWeight(settings.transitionX, settings.transitionY));
+
+            } else {
+                if (idleChrouchAction?.getEffectiveWeight()>= .9) {
+                    idleChrouchAction.fadeOut(.2)
+                }
+                chrouchLeftAction?.setEffectiveWeight(0);
+                chrouchRightAction?.setEffectiveWeight(0);
+                chrouchBackAction?.setEffectiveWeight(0);
+                chrouchForwardAction?.setEffectiveWeight(0);
+                // idleChrouchAction?.setEffectiveWeight(0);
 
                 // eski yürüyüş mantığınız
                 walkLeftAction?.setEffectiveWeight(-THREE.MathUtils.clamp(settings.transitionX, -1, 0));
@@ -440,7 +473,44 @@ export default function ThreeScene() {
                 // idleAction?.setEffectiveWeight(getIdleWeight(settings.transitionX, settings.transitionY));
                 walkBackAction?.setEffectiveWeight(-THREE.MathUtils.clamp(settings.transitionY, -1, 0));
                 walkForwardAction?.setEffectiveWeight(THREE.MathUtils.clamp(settings.transitionY, 0, 1));
+                
+                if (isRunningRef.current) {
+                    // yürüyüşü sıfırla
+                    walkLeftAction?.setEffectiveWeight(0);
+                    walkRightAction?.setEffectiveWeight(0);
+                    walkBackAction?.setEffectiveWeight(0);
+                    walkForwardAction?.setEffectiveWeight(0);
+                    // idleAction?.setEffectiveWeight(0);
+                    // koşu animasyonları
+                    runLeftAction?.setEffectiveWeight(-THREE.MathUtils.clamp(settings.transitionX, -1, 0));
+                    runRightAction?.setEffectiveWeight(THREE.MathUtils.clamp(settings.transitionX, 0, 1));
+                    runBackAction?.setEffectiveWeight(-THREE.MathUtils.clamp(settings.transitionY, -1, 0));
+                    runForwardAction?.setEffectiveWeight(THREE.MathUtils.clamp(settings.transitionY, 0, 1));
+                } else {
+    
+                    runLeftAction?.setEffectiveWeight(0);
+                    runRightAction?.setEffectiveWeight(0);
+                    runBackAction?.setEffectiveWeight(0);
+                    runForwardAction?.setEffectiveWeight(0);
+    
+                    // eski yürüyüş mantığınız
+                    walkLeftAction?.setEffectiveWeight(-THREE.MathUtils.clamp(settings.transitionX, -1, 0));
+                    walkRightAction?.setEffectiveWeight(THREE.MathUtils.clamp(settings.transitionX, 0, 1));
+                    // idleAction?.setEffectiveWeight(getIdleWeight(settings.transitionX, settings.transitionY));
+                    walkBackAction?.setEffectiveWeight(-THREE.MathUtils.clamp(settings.transitionY, -1, 0));
+                    walkForwardAction?.setEffectiveWeight(THREE.MathUtils.clamp(settings.transitionY, 0, 1));
+                }
             }
+
+            idleAction?.setEffectiveWeight(getIdleWeight(settings.transitionX, settings.transitionY));
+
+
+            if (isRunningRef.current) {
+                
+            }else{
+                spineController?.update();
+            }
+
 
             // ---- Fire weight lerp ----
             if (idleFireAction) {
@@ -512,6 +582,7 @@ export default function ThreeScene() {
         const intersects = raycaster.current.intersectObjects(scene.children, true);
         if (intersects.length > 0) {
             const hit = intersects[0];
+            if (hit.object.name != "targetObject") return;
             // istediğin yarıçap
             const radius = 5;
 
@@ -632,6 +703,32 @@ export default function ThreeScene() {
             }}
         >
             💥
+        </button>
+        {/* Crouch */}
+        <button
+            style={{
+                position: 'fixed',
+                bottom: 'calc(var(--vvw) * 0.17 + env(safe-area-inset-bottom))',
+                left: 'calc(var(--vvw) * 0.05 + env(safe-area-inset-left))',
+                width: `calc(var(--vvh) * 0.12)`,
+                height: `calc(var(--vvh) * 0.12)`,
+                padding: 0,
+                fontSize: 'calc(var(--vvh) * 0.08)',
+                borderRadius: '50%',
+                background: isChrouching ? 'orange' : "grey",
+                color: 'white',
+                border: 'none',
+                userSelect: 'none',           // metin seçimini iptal et
+                touchAction: 'none'
+            }}
+            onPointerDown={() => {
+                setIsChrouching(true)
+            }}
+            onPointerUp={() => {
+                setIsChrouching(false)
+            }}
+        >
+            🧎🏻
         </button>
         {/* refresh */}
         <button
