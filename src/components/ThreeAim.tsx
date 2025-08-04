@@ -438,17 +438,15 @@ export default function ThreeScene() {
 
                 }
             }
+            idleAction?.setEffectiveWeight(getIdleWeight(settings.transitionX, settings.transitionY));
              
             if (isChrouchingRef.current) {
-                if (idleAction?.getEffectiveWeight()>= .9) {
-                    idleAction.fadeOut(.2)
-                }
                 // yürüyüşü sıfırla
                 walkLeftAction?.setEffectiveWeight(0);
                 walkRightAction?.setEffectiveWeight(0);
                 walkBackAction?.setEffectiveWeight(0);
                 walkForwardAction?.setEffectiveWeight(0);
-                // idleAction?.setEffectiveWeight(0);
+                idleAction?.setEffectiveWeight(0);
 
                 // koşu animasyonları
                 chrouchLeftAction?.setEffectiveWeight(-THREE.MathUtils.clamp(settings.transitionX, -1, 0));
@@ -458,14 +456,11 @@ export default function ThreeScene() {
                 idleChrouchAction?.setEffectiveWeight(getIdleWeight(settings.transitionX, settings.transitionY));
 
             } else {
-                if (idleChrouchAction?.getEffectiveWeight()>= .9) {
-                    idleChrouchAction.fadeOut(.2)
-                }
                 chrouchLeftAction?.setEffectiveWeight(0);
                 chrouchRightAction?.setEffectiveWeight(0);
                 chrouchBackAction?.setEffectiveWeight(0);
                 chrouchForwardAction?.setEffectiveWeight(0);
-                // idleChrouchAction?.setEffectiveWeight(0);
+                idleChrouchAction?.setEffectiveWeight(0);
 
                 // eski yürüyüş mantığınız
                 walkLeftAction?.setEffectiveWeight(-THREE.MathUtils.clamp(settings.transitionX, -1, 0));
@@ -501,9 +496,6 @@ export default function ThreeScene() {
                     walkForwardAction?.setEffectiveWeight(THREE.MathUtils.clamp(settings.transitionY, 0, 1));
                 }
             }
-
-            idleAction?.setEffectiveWeight(getIdleWeight(settings.transitionX, settings.transitionY));
-
 
             if (isRunningRef.current) {
                 
