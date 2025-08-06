@@ -8,7 +8,8 @@ import { TransformControls } from 'three/examples/jsm/controls/TransformControls
 import { GUI, color } from 'dat.gui';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import Joystick from './Joystick.tsx'; // Joystick bileşenini import et
-
+const BASE = process.env.PUBLIC_URL;  // → "/boxer"
+console.log("zort",BASE)
 var player: THREE.Object3D;
 var deltaTime;
 var idleFireAction: THREE.AnimationAction;
@@ -253,7 +254,8 @@ export default function ThreeScene() {
 
         // Load GLTF
         new GLTFLoader().load(
-            '/models/aimDummy.glb',
+            // '/models/aimDummy.glb',
+            `${BASE}/models/aimDummy.glb`,
             gltf => {
                 const model = SkeletonUtils.clone(gltf.scene);
                 scene.add(model);
@@ -342,11 +344,17 @@ export default function ThreeScene() {
                 rifle = model.getObjectByName("Rifle") as THREE.Object3D;
 
                 muzzle = new utils.MuzzleFlashAnimator(rifle, [
-                    '/textures/shoot1.png',
-                    '/textures/shoot2.png',
-                    '/textures/shoot3.png',
-                    '/textures/shoot4.png',
-                    '/textures/shoot5.png',
+                    // '/textures/shoot1.png',
+                    // '/textures/shoot2.png',
+                    // '/textures/shoot3.png',
+                    // '/textures/shoot4.png',
+                    // '/textures/shoot5.png',
+                    
+                    `${BASE}/textures/shoot1.png`,
+                    `${BASE}/textures/shoot2.png`,
+                    `${BASE}/textures/shoot3.png`,
+                    `${BASE}/textures/shoot4.png`,
+                    `${BASE}/textures/shoot5.png`,
                 ], 50, true, true);
 
                 rightHand = model.getObjectByName("mixamorigRightHand") as THREE.Object3D;
