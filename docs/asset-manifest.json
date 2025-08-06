@@ -1,0 +1,13 @@
+{
+  "files": {
+    "main.css": "/boxer/static/css/main.94fc4ebc.css",
+    "main.js": "/boxer/static/js/main.055b8695.js",
+    "index.html": "/boxer/index.html",
+    "main.94fc4ebc.css.map": "/boxer/static/css/main.94fc4ebc.css.map",
+    "main.055b8695.js.map": "/boxer/static/js/main.055b8695.js.map"
+  },
+  "entrypoints": [
+    "static/css/main.94fc4ebc.css",
+    "static/js/main.055b8695.js"
+  ]
+}
