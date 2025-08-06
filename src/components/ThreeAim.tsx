@@ -49,13 +49,14 @@ export default function ThreeScene() {
     const [isRunning, setIsRunning] = useState(false);
     const [isFiring, setIsFiring] = useState(false);
     const [isChrouching, setIsChrouching] = useState(false);
+    const [crossSize, setCrossize] = useState(1);
     const isRunningRef = useRef(isRunning);
     const isChrouchingRef = useRef(isChrouching);
     // References to core Three.js objects
     const sceneRef = useRef<THREE.Scene>(null);
     const cameraRef = useRef<THREE.PerspectiveCamera>(null);
     const rendererRef = useRef<THREE.WebGLRenderer>(null);
- 
+
     useEffect(() => { isRunningRef.current = isRunning; }, [isRunning]);
     useEffect(() => { isChrouchingRef.current = isChrouching; }, [isChrouching]);
     // Raycaster for hitscan
@@ -68,7 +69,7 @@ export default function ThreeScene() {
 
         moveCharacter(joystickCoords, player, isRunning ? 3 : 1.3, deltaTime)
     }, [joystickCoords])
-    
+
     function moveCharacter(joystick, mesh, baseMoveSpeed, deltaTime) {
         const { x, y } = joystick;
         const inputMagnitude = Math.hypot(x, y);
@@ -146,9 +147,9 @@ export default function ThreeScene() {
 
         targetBox = utils.AddSphere(scene, .2, "grey")
         targetBox.name = "targetObject";
-        targetBox.position.x = 3 
-        targetBox.position.y = 1 
-        targetBox.position.z = 2 
+        targetBox.position.x = 3
+        targetBox.position.y = 1
+        targetBox.position.z = 2
 
         // GUI setup
         const gui = new GUI({ width: 300 });
@@ -199,6 +200,8 @@ export default function ThreeScene() {
         var riflePositionOffset = new THREE.Vector3(3.59, 7.86, 3.23)
         var Test = gui.addFolder('Test')
         var leftArmIK;
+        var idleActionLerp = new utils.LerpManager();
+        var idleChrouchActionLerp = new utils.LerpManager();
 
         Test.add(rifleOffset, 'x', -360, 360, 0.01).name('rifleOffset x').onChange(v => { rifleOffset.x = v }).listen()
         Test.add(rifleOffset, 'y', -360, 360, 0.01).name('rifleOffset y').onChange(v => { rifleOffset.y = v }).listen()
@@ -271,8 +274,6 @@ export default function ThreeScene() {
                 idleFireUpperAction.play();
                 idleFireAction.clampWhenFinished = false;
 
-
-
                 // Eski idleFireAction değişkenine artık gerek yok,
                 // ama kodun geri kalanını bozmamak için şöyle güncelleyin:
                 idleFireAction = idleFireUpperAction;
@@ -335,6 +336,9 @@ export default function ThreeScene() {
                 chrouchLeftAction.play();
                 chrouchRightAction.play();
 
+                idleActionLerp.setActions((x: number) => idleAction.setEffectiveWeight(x), () => idleAction.getEffectiveWeight())
+                idleChrouchActionLerp.setActions((x: number) => idleChrouchAction.setEffectiveWeight(x), () => idleChrouchAction.getEffectiveWeight())
+
                 rifle = model.getObjectByName("Rifle") as THREE.Object3D;
 
                 muzzle = new utils.MuzzleFlashAnimator(rifle, [
@@ -361,7 +365,6 @@ export default function ThreeScene() {
                     offset: aimSpineOffset,
                     rifleOffset: rifleOffset,
                 })
-
                 leftArmIK = new utils.FabrikLeftArm(
                     {
                         shoulder: model.getObjectByName('mixamorigLeftArm') as THREE.Bone,
@@ -438,29 +441,37 @@ export default function ThreeScene() {
 
                 }
             }
-            idleAction?.setEffectiveWeight(getIdleWeight(settings.transitionX, settings.transitionY));
-             
+
+            // idleAction?.setEffectiveWeight(getIdleWeight(settings.transitionX, settings.transitionY));
+            idleActionLerp?.push(getIdleWeight(settings.transitionX, settings.transitionY), 1);
+
             if (isChrouchingRef.current) {
                 // yürüyüşü sıfırla
                 walkLeftAction?.setEffectiveWeight(0);
                 walkRightAction?.setEffectiveWeight(0);
                 walkBackAction?.setEffectiveWeight(0);
                 walkForwardAction?.setEffectiveWeight(0);
-                idleAction?.setEffectiveWeight(0);
+                // idleAction?.setEffectiveWeight(0);
+                idleActionLerp?.push(0);
 
                 // koşu animasyonları
                 chrouchLeftAction?.setEffectiveWeight(-THREE.MathUtils.clamp(settings.transitionX, -1, 0));
                 chrouchRightAction?.setEffectiveWeight(THREE.MathUtils.clamp(settings.transitionX, 0, 1));
                 chrouchBackAction?.setEffectiveWeight(-THREE.MathUtils.clamp(settings.transitionY, -1, 0));
                 chrouchForwardAction?.setEffectiveWeight(THREE.MathUtils.clamp(settings.transitionY, 0, 1));
-                idleChrouchAction?.setEffectiveWeight(getIdleWeight(settings.transitionX, settings.transitionY));
+                // idleChrouchAction?.setEffectiveWeight(getIdleWeight(settings.transitionX, settings.transitionY));
+                idleChrouchActionLerp?.push(getIdleWeight(settings.transitionX, settings.transitionY), 1);
+                aimSpineOffset.x = 10
 
             } else {
+                aimSpineOffset.x = -4
+
                 chrouchLeftAction?.setEffectiveWeight(0);
                 chrouchRightAction?.setEffectiveWeight(0);
                 chrouchBackAction?.setEffectiveWeight(0);
                 chrouchForwardAction?.setEffectiveWeight(0);
-                idleChrouchAction?.setEffectiveWeight(0);
+                // idleChrouchAction?.setEffectiveWeight(0);
+                idleChrouchActionLerp?.push(0);
 
                 // eski yürüyüş mantığınız
                 walkLeftAction?.setEffectiveWeight(-THREE.MathUtils.clamp(settings.transitionX, -1, 0));
@@ -468,7 +479,7 @@ export default function ThreeScene() {
                 // idleAction?.setEffectiveWeight(getIdleWeight(settings.transitionX, settings.transitionY));
                 walkBackAction?.setEffectiveWeight(-THREE.MathUtils.clamp(settings.transitionY, -1, 0));
                 walkForwardAction?.setEffectiveWeight(THREE.MathUtils.clamp(settings.transitionY, 0, 1));
-                
+
                 if (isRunningRef.current) {
                     // yürüyüşü sıfırla
                     walkLeftAction?.setEffectiveWeight(0);
@@ -482,12 +493,12 @@ export default function ThreeScene() {
                     runBackAction?.setEffectiveWeight(-THREE.MathUtils.clamp(settings.transitionY, -1, 0));
                     runForwardAction?.setEffectiveWeight(THREE.MathUtils.clamp(settings.transitionY, 0, 1));
                 } else {
-    
+
                     runLeftAction?.setEffectiveWeight(0);
                     runRightAction?.setEffectiveWeight(0);
                     runBackAction?.setEffectiveWeight(0);
                     runForwardAction?.setEffectiveWeight(0);
-    
+
                     // eski yürüyüş mantığınız
                     walkLeftAction?.setEffectiveWeight(-THREE.MathUtils.clamp(settings.transitionX, -1, 0));
                     walkRightAction?.setEffectiveWeight(THREE.MathUtils.clamp(settings.transitionX, 0, 1));
@@ -498,11 +509,10 @@ export default function ThreeScene() {
             }
 
             if (isRunningRef.current) {
-                
-            }else{
+
+            } else {
                 spineController?.update();
             }
-
 
             // ---- Fire weight lerp ----
             if (idleFireAction) {
@@ -515,6 +525,8 @@ export default function ThreeScene() {
             }
 
             leftArmIK?.update();
+            idleActionLerp?.update()
+            idleChrouchActionLerp?.update()
 
             renderer.render(scene, camera);
             requestAnimationFrame(animate);
@@ -535,6 +547,8 @@ export default function ThreeScene() {
             window.visualViewport?.removeEventListener('scroll', onWindowResize);
             gui.destroy();
             //controls.dispose();
+            idleActionLerp?.clear()
+            idleChrouchActionLerp?.clear()
             renderer.dispose();
             if (mount) mount.innerHTML = '';
             mountRef?.current?.removeChild(renderer.domElement)
@@ -574,7 +588,7 @@ export default function ThreeScene() {
         const intersects = raycaster.current.intersectObjects(scene.children, true);
         if (intersects.length > 0) {
             const hit = intersects[0];
-            if (hit.object.name != "targetObject") return;
+            if (hit.object.name !== "targetObject") return;
             // istediğin yarıçap
             const radius = 5;
 
@@ -609,19 +623,17 @@ export default function ThreeScene() {
         }}
     >
         <div ref={mountRef} style={{ width: '100%', height: '100%' }} />
-        {/* Crossbow için ortadaki nişangâh */}
         <div
             style={{
                 position: 'fixed',
                 /* Görünen alanın tam ortası */
-                top: `calc(var(--vvh) * 0.5)`,
-                left: `calc(var(--vvw) * 0.5)`,
+                top: '50%',
+                left: '50%',
                 /* Çapı, görüntü yüksekliğinin %5’i */
-                width: `calc(var(--vvh) * 0.03)`,
-                height: `calc(var(--vvh) * 0.03)`,
-                /* Merkezleme: yarı çap kadar negatif ofset */
-                marginLeft: `calc(var(--vvh) * -0.025)`,
-                marginTop: `calc(var(--vvh) * -0.025)`,
+                width: `calc(var(--vvh) * 0.01)`,
+                height: `calc(var(--vvh) * 0.01)`,
+                /* Pivot’u merkeze al ve -50% kaydır */
+                transform: `translate(-50%, -50%) scale(${crossSize})`,
                 border: '2px solid black',
                 borderRadius: '50%',
                 pointerEvents: 'none',
@@ -682,16 +694,19 @@ export default function ThreeScene() {
                 touchAction: 'none'
             }}
             onPointerDown={() => {
+                setCrossize(3)
                 shoot()
                 fireTarget = 1;        // hedef  → 1
                 setIsFiring(true);
-                muzzle.play();
+                muzzle?.play();
             }}
 
             onPointerUp={() => {
+                setCrossize(1)
+
                 fireTarget = 0;        // hedef  → 0
                 setIsFiring(false);
-                muzzle.stop();
+                muzzle?.stop();
             }}
         >
             💥
