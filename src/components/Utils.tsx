@@ -358,13 +358,11 @@ export class LerpManager {
 
   update() {
     if (this.action == null || this.get == null) return
-    const anim = this.get()
     if (this.newWeight == null) return
 
-    const diff = Math.abs(this.last - this.newWeight)
     this.last = THREE.MathUtils.lerp(
       this.last,
-      this.newWeight + anim,
+      this.newWeight,
       this.lerpFactor
     )
 
@@ -548,6 +546,15 @@ export class MuzzleFlashAnimator {
   }
 }
 
+/**
+ * Belirlenen minimum ve maksimum değerler arasında ondalıklı rastgele bir sayı döndürür.
+ * @param {number} min - Rastgele sayının alt sınırı (dahil).
+ * @param {number} max - Rastgele sayının üst sınırı (hariç).
+ * @returns {number} Rastgele oluşturulmuş sayı.
+ */
+export function getRandomFloat(min, max) {
+  return Math.random() * (max - min) + min;
+}
 
 export class FabrikLeftArm2 {
   private chain: THREE.Bone[];

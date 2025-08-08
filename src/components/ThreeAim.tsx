@@ -35,7 +35,8 @@ var muzzle: utils.MuzzleFlashAnimator
 let fireWeight = 0;   // anlık ağırlık
 let fireTarget = 0;   // hedef ağırlık (0 veya 1)
 const FIRE_LERP_K = 20;   // hız katsayısı (büyüdükçe daha hızlı)
-
+// Hedefleri tek bir yerde topla
+const hittables: THREE.Object3D[] = [];
 var targetBox
 
 // Kontrol için bir ayarlar nesnesi oluşturalım
@@ -50,7 +51,7 @@ export default function ThreeScene() {
     const [isRunning, setIsRunning] = useState(false);
     const [isFiring, setIsFiring] = useState(false);
     const [isChrouching, setIsChrouching] = useState(false);
-    const [crossSize, setCrossize] = useState(1);
+    const [crossSize, setCrossize] = useState(.01);
     const isRunningRef = useRef(isRunning);
     const isChrouchingRef = useRef(isChrouching);
     // References to core Three.js objects
@@ -146,18 +147,12 @@ export default function ThreeScene() {
         const aimTarget = utils.AddSphere(aimSphere, .1, null)
         aimTarget.position.z = 10
 
-        targetBox = utils.AddSphere(scene, .2, "grey")
-        targetBox.name = "targetObject";
-        targetBox.position.x = 3
-        targetBox.position.y = 1
-        targetBox.position.z = 2
+        // targetBox = utils.AddSphere(scene, .2, "grey")
+        // targetBox.name = "targetObject";
+        // targetBox.position.x = 3
+        // targetBox.position.y = 1
+        // targetBox.position.z = 2
 
-        // GUI setup
-        const gui = new GUI({ width: 300 });
-        gui.hide();
-        gui.closed = true
-        const camFolder = gui.addFolder('Camera')
-        // 2) controller’ları “params” objesine bağla ve onChange ile kamerayı güncelle
         const params = {
             posX: camera.position.x,
             posY: camera.position.y,
@@ -171,24 +166,6 @@ export default function ThreeScene() {
             rootZ: 0,
         }
 
-        camFolder.add(params, 'posX', -10, 10, 0.01).name('Pos X')
-            .onChange(v => { camera.position.x = v }).listen()
-
-        camFolder.add(params, 'posY', -10, 10, 0.01).name('Pos Y')
-            .onChange(v => { camera.position.y = v }).listen()
-
-        camFolder.add(params, 'posZ', -10, 10, 0.01).name('Pos Z')
-            .onChange(v => { camera.position.z = v }).listen()
-
-        camFolder.add(params, 'rotX', -Math.PI, Math.PI, 0.01).name('Rot X')
-            .onChange(v => { camera.rotation.x = v }).listen()
-
-        camFolder.add(params, 'rotY', -Math.PI, Math.PI, 0.01).name('Rot Y')
-            .onChange(v => { camera.rotation.y = v }).listen()
-
-        camFolder.add(params, 'rotZ', -Math.PI, Math.PI, 0.01).name('Rot Z')
-            .onChange(v => { camera.rotation.z = v }).listen()
-
         let mixer;
         const clock = new THREE.Clock();
         var rifle: THREE.Object3D;
@@ -199,30 +176,58 @@ export default function ThreeScene() {
         var rifleOffset = new THREE.Vector3(26.76, 110.1, 13.96)
         var aimSpineOffset = new THREE.Vector3(-4, -43.67, 0)
         var riflePositionOffset = new THREE.Vector3(3.59, 7.86, 3.23)
-        var Test = gui.addFolder('Test')
         var leftArmIK;
         var idleActionLerp = new utils.LerpManager();
         var idleChrouchActionLerp = new utils.LerpManager();
 
-        Test.add(rifleOffset, 'x', -360, 360, 0.01).name('rifleOffset x').onChange(v => { rifleOffset.x = v }).listen()
-        Test.add(rifleOffset, 'y', -360, 360, 0.01).name('rifleOffset y').onChange(v => { rifleOffset.y = v }).listen()
-        Test.add(rifleOffset, 'z', -360, 360, 0.01).name('rifleOffset z').onChange(v => { rifleOffset.z = v }).listen()
+        // GUI setup
+        let gui: GUI | null = null;
+        if (process.env.NODE_ENV === 'development') {
+            gui = new GUI({ width: 300 });
+            gui.closed = true;
+            const camFolder = gui.addFolder('Camera')
+            // 2) controller’ları “params” objesine bağla ve onChange ile kamerayı güncelle
+    
+            camFolder.add(params, 'posX', -10, 10, 0.01).name('Pos X')
+                .onChange(v => { camera.position.x = v }).listen()
+    
+            camFolder.add(params, 'posY', -10, 10, 0.01).name('Pos Y')
+                .onChange(v => { camera.position.y = v }).listen()
+    
+            camFolder.add(params, 'posZ', -10, 10, 0.01).name('Pos Z')
+                .onChange(v => { camera.position.z = v }).listen()
+    
+            camFolder.add(params, 'rotX', -Math.PI, Math.PI, 0.01).name('Rot X')
+                .onChange(v => { camera.rotation.x = v }).listen()
+    
+            camFolder.add(params, 'rotY', -Math.PI, Math.PI, 0.01).name('Rot Y')
+                .onChange(v => { camera.rotation.y = v }).listen()
+    
+            camFolder.add(params, 'rotZ', -Math.PI, Math.PI, 0.01).name('Rot Z')
+                .onChange(v => { camera.rotation.z = v }).listen()
+            
+            var Test = gui.addFolder('Test')
 
-        Test.add(aimSpineOffset, 'x', -360, 360, 0.01).name('aimSpineOffset x').onChange(v => { aimSpineOffset.x = v }).listen()
-        Test.add(aimSpineOffset, 'y', -360, 360, 0.01).name('aimSpineOffset y').onChange(v => { aimSpineOffset.y = v }).listen()
-        Test.add(aimSpineOffset, 'z', -360, 360, 0.01).name('aimSpineOffset z').onChange(v => { aimSpineOffset.z = v }).listen()
+            Test.add(rifleOffset, 'x', -360, 360, 0.01).name('rifleOffset x').onChange(v => { rifleOffset.x = v }).listen()
+            Test.add(rifleOffset, 'y', -360, 360, 0.01).name('rifleOffset y').onChange(v => { rifleOffset.y = v }).listen()
+            Test.add(rifleOffset, 'z', -360, 360, 0.01).name('rifleOffset z').onChange(v => { rifleOffset.z = v }).listen()
 
-        Test.add(riflePositionOffset, 'x', -10, 10, 0.01).name('riflePositionOffset x').onChange(v => { riflePositionOffset.x = v }).listen()
-        Test.add(riflePositionOffset, 'y', -10, 10, 0.01).name('riflePositionOffset y').onChange(v => { riflePositionOffset.y = v }).listen()
-        Test.add(riflePositionOffset, 'z', -10, 10, 0.01).name('riflePositionOffset z').onChange(v => { riflePositionOffset.z = v }).listen()
+            Test.add(aimSpineOffset, 'x', -360, 360, 0.01).name('aimSpineOffset x').onChange(v => { aimSpineOffset.x = v }).listen()
+            Test.add(aimSpineOffset, 'y', -360, 360, 0.01).name('aimSpineOffset y').onChange(v => { aimSpineOffset.y = v }).listen()
+            Test.add(aimSpineOffset, 'z', -360, 360, 0.01).name('aimSpineOffset z').onChange(v => { aimSpineOffset.z = v }).listen()
+
+            Test.add(riflePositionOffset, 'x', -10, 10, 0.01).name('riflePositionOffset x').onChange(v => { riflePositionOffset.x = v }).listen()
+            Test.add(riflePositionOffset, 'y', -10, 10, 0.01).name('riflePositionOffset y').onChange(v => { riflePositionOffset.y = v }).listen()
+            Test.add(riflePositionOffset, 'z', -10, 10, 0.01).name('riflePositionOffset z').onChange(v => { riflePositionOffset.z = v }).listen()
+        }
 
         // 1) resize handler
         const onWindowResize = () => {
-            const width = mount.clientWidth;
-            const height = mount.clientHeight;
+            // const width = mount.clientWidth;
+            // const height = mount.clientHeight;
 
-            // const width = window.innerWidth;
-            // const height = window.innerHeight;
+            const width = window.innerWidth;
+            const height = window.innerHeight;
 
             // Kamera aspect ve projeksiyon matrisini güncelle
             camera.aspect = width / height;
@@ -252,7 +257,6 @@ export default function ThreeScene() {
             return THREE.MathUtils.clamp(idleWeight, 0, 1);
         }
 
-        // Load GLTF
         new GLTFLoader().load(
             // '/models/aimDummy.glb',
             `${BASE}/models/aimDummy.glb`,
@@ -344,12 +348,6 @@ export default function ThreeScene() {
                 rifle = model.getObjectByName("Rifle") as THREE.Object3D;
 
                 muzzle = new utils.MuzzleFlashAnimator(rifle, [
-                    // '/textures/shoot1.png',
-                    // '/textures/shoot2.png',
-                    // '/textures/shoot3.png',
-                    // '/textures/shoot4.png',
-                    // '/textures/shoot5.png',
-                    
                     `${BASE}/textures/shoot1.png`,
                     `${BASE}/textures/shoot2.png`,
                     `${BASE}/textures/shoot3.png`,
@@ -364,6 +362,11 @@ export default function ThreeScene() {
                 hips = model.getObjectByName("mixamorigHips") as THREE.Object3D;
                 player = model.getObjectByName("Right") as THREE.Object3D;
                 aimSphere.attach(camera)
+
+                // hide floor
+                const floor = model.getObjectByName("Floor") as THREE.Object3D;
+                floor.visible = false
+
 
                 spineController = new utils.SpineAimController({
                     spineBone: spine,
@@ -393,11 +396,27 @@ export default function ThreeScene() {
                 const gizmo = control.getHelper();
                 // scene.add( gizmo );
 
+                new GLTFLoader().load(
+                    `${BASE}/models/environment.glb`,
+                    gltf => {
+                        scene.add(gltf.scene);
+                        targetBox = gltf.scene.getObjectByName("targetObject") as THREE.Object3D
+                        targetBox.position.x = 0
+                        targetBox.position.y = 2
+                        targetBox.position.z = 3
+                        
+                        targetBox.rotation.y = Math.PI
+                        
+                        // Model veya sahne yüklenirken hedef objeyi ekle:
+                        hittables.push(targetBox); // targetBox zaten referansın var
+
+                        const box = gltf.scene.getObjectByName("box") as THREE.Object3D
+                    });
+
             },
             xhr => console.log(`Loading: ${(xhr.loaded / xhr.total * 100).toFixed(1)}%`),
             err => console.error('Error loading model:', err)
         );
-
 
         // addPositionSlidersToGUI(scene, gui)
         // Render loop
@@ -425,7 +444,9 @@ export default function ThreeScene() {
                 // player.rotation.z = params.rootZ;
             }
 
-            gui.updateDisplay();
+            if (process.env.NODE_ENV === 'development' && gui) {
+                gui.updateDisplay();
+            }
 
             // find gun
             if (rifle) {
@@ -553,7 +574,9 @@ export default function ThreeScene() {
             window.removeEventListener('resize', onWindowResize);
             window.visualViewport?.removeEventListener('resize', onWindowResize);
             window.visualViewport?.removeEventListener('scroll', onWindowResize);
-            gui.destroy();
+            if (process.env.NODE_ENV === 'development' && gui) {
+                gui.destroy();
+            }
             //controls.dispose();
             idleActionLerp?.clear()
             idleChrouchActionLerp?.clear()
@@ -587,38 +610,30 @@ export default function ThreeScene() {
         }
     }, [])
 
-    // Shoot function using raycast
+    // Shoot function using raycast (optimize)
     const shoot = useCallback(() => {
-        const scene = sceneRef.current!;
         const camera = cameraRef.current!;
+
+        // Ekran merkezinden ray at (0,0 normalized device coords)
         pointer.current.set(0, 0);
         raycaster.current.setFromCamera(pointer.current, camera);
-        const intersects = raycaster.current.intersectObjects(scene.children, true);
+
+        // Sadece hedef listesine raycast yap, derin arama yok
+        const intersects = raycaster.current.intersectObjects(hittables, false);
+
         if (intersects.length > 0) {
             const hit = intersects[0];
             if (hit.object.name !== "targetObject") return;
-            // istediğin yarıçap
-            const radius = 5;
-
-            // rastgele açı ve mesafe seç
-            const angle = Math.random() * Math.PI * 2;
-            const distance = Math.random() * radius;
 
             // yeni X,Z konumlarını hesapla
-            const newX = Math.cos(angle) * distance;
-            const newZ = Math.sin(angle) * distance;
-
-            // Y eksenini yer altında kalmayacak şekilde orijinal yüksekliğe ya da 0’a sabitle
-            const newY = Math.max(hit.point.y, 1);
+            const newX = utils.getRandomFloat(-2, 2);
+            const newY = utils.getRandomFloat(0.5, 3);
 
             // taşı
-            hit.object.position.set(newX, newY, newZ);
-            // console.log('Ray hit object:', hit.object, 'at point', hit.point);
-            // sceneRef.current?.remove(hit.object);
-
-            // e.g. apply damage: hit.object.userData.takeDamage?.(10);
+            targetBox.position.set(newX, newY, targetBox.position.z);
         }
     }, []);
+
 
     return <div
         // style={{ position: 'fixed', width: '100vw', height: '100vh', overflow: 'hidden' }}
@@ -638,10 +653,10 @@ export default function ThreeScene() {
                 top: '50%',
                 left: '50%',
                 /* Çapı, görüntü yüksekliğinin %5’i */
-                width: `calc(var(--vvh) * 0.01)`,
-                height: `calc(var(--vvh) * 0.01)`,
+                width: `calc(var(--vvh) * ${crossSize})`,
+                height: `calc(var(--vvh) * ${crossSize})`,
                 /* Pivot’u merkeze al ve -50% kaydır */
-                transform: `translate(-50%, -50%) scale(${crossSize})`,
+                transform: `translate(-50%, -50%)`,
                 border: '2px solid black',
                 borderRadius: '50%',
                 pointerEvents: 'none',
@@ -690,8 +705,8 @@ export default function ThreeScene() {
                 position: 'fixed',
                 bottom: 'calc(var(--vvw) * 0.12 + env(safe-area-inset-bottom))',
                 right: 'calc(var(--vvw) * 0.05 + env(safe-area-inset-right))',
-                width: `calc(var(--vvh) * 0.12)`,
-                height: `calc(var(--vvh) * 0.12)`,
+                width: `calc(var(--vvh) * 0.15)`,
+                height: `calc(var(--vvh) * 0.15)`,
                 padding: 0,
                 fontSize: 'calc(var(--vvh) * 0.08)',
                 borderRadius: '50%',
@@ -702,7 +717,7 @@ export default function ThreeScene() {
                 touchAction: 'none'
             }}
             onPointerDown={() => {
-                setCrossize(3)
+                setCrossize(.03)
                 shoot()
                 fireTarget = 1;        // hedef  → 1
                 setIsFiring(true);
@@ -710,8 +725,7 @@ export default function ThreeScene() {
             }}
 
             onPointerUp={() => {
-                setCrossize(1)
-
+                setCrossize(.01)
                 fireTarget = 0;        // hedef  → 0
                 setIsFiring(false);
                 muzzle?.stop();
