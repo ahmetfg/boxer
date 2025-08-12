@@ -35,3 +35,38 @@ code {
   width: var(--vvw);
   height: var(--vvh);
 }
+
+/* Ekran döndür uyarısı – portrait'ta göster, landscape'te gizle */
+.rotate-lock {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  display: none;                 /* default: görünmez */
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: max(24px, env(safe-area-inset-top)) max(24px, env(safe-area-inset-right))
+           max(24px, env(safe-area-inset-bottom)) max(24px, env(safe-area-inset-left));
+  background: #ffffff;
+  color: #525252;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+}
+
+.rotate-lock .card {
+  max-width: 26rem;
+  border-radius: 18px;
+  padding: 20px 24px;
+  background: #ededed;
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+}
+
+.rotate-lock h2 { margin: 0 0 3px; font-size: 1.1rem; font-weight: 700; }
+.rotate-lock p  { margin: 0; opacity: .9; font-size: .95rem; }
+
+/* Portrait'ta overlay’i aç */
+@media (orientation: portrait) {
+  .rotate-lock { display: flex; }
+  /* İstersen sayfayı scroll/touch’tan da kilitle */
+  body { overflow: hidden; touch-action: none; }
+}

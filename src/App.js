@@ -59,10 +59,10 @@ function viewPortListen() {
 
 function App() {
   useLockScroll();
-  
-  useEffect(()=>{
+
+  useEffect(() => {
     viewPortListen();
-  },[])
+  }, [])
 
   return (
     <div className="App" style={{
@@ -75,6 +75,12 @@ function App() {
       glbPath2="/models/track2.glb"
       animationName="CubeAction.001"
       /> */}
+      <div id="rotate-lock" className="rotate-lock" aria-hidden>
+        <div className="card">
+          <h2>Please rotate your phone</h2>
+          <p>It works in landscape mode.</p>
+        </div>
+      </div>
       <ThreeScene />
     </div>
   );

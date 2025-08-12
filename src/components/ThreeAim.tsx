@@ -9,7 +9,7 @@ import { GUI, color } from 'dat.gui';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import Joystick from './Joystick.tsx'; // Joystick bileşenini import et
 const BASE = process.env.PUBLIC_URL;  // → "/boxer"
-console.log("zort",BASE)
+console.log("zort", BASE)
 var player: THREE.Object3D;
 var deltaTime;
 var idleFireAction: THREE.AnimationAction;
@@ -187,25 +187,25 @@ export default function ThreeScene() {
             gui.closed = true;
             const camFolder = gui.addFolder('Camera')
             // 2) controller’ları “params” objesine bağla ve onChange ile kamerayı güncelle
-    
+
             camFolder.add(params, 'posX', -10, 10, 0.01).name('Pos X')
                 .onChange(v => { camera.position.x = v }).listen()
-    
+
             camFolder.add(params, 'posY', -10, 10, 0.01).name('Pos Y')
                 .onChange(v => { camera.position.y = v }).listen()
-    
+
             camFolder.add(params, 'posZ', -10, 10, 0.01).name('Pos Z')
                 .onChange(v => { camera.position.z = v }).listen()
-    
+
             camFolder.add(params, 'rotX', -Math.PI, Math.PI, 0.01).name('Rot X')
                 .onChange(v => { camera.rotation.x = v }).listen()
-    
+
             camFolder.add(params, 'rotY', -Math.PI, Math.PI, 0.01).name('Rot Y')
                 .onChange(v => { camera.rotation.y = v }).listen()
-    
+
             camFolder.add(params, 'rotZ', -Math.PI, Math.PI, 0.01).name('Rot Z')
                 .onChange(v => { camera.rotation.z = v }).listen()
-            
+
             var Test = gui.addFolder('Test')
 
             Test.add(rifleOffset, 'x', -360, 360, 0.01).name('rifleOffset x').onChange(v => { rifleOffset.x = v }).listen()
@@ -404,9 +404,9 @@ export default function ThreeScene() {
                         targetBox.position.x = 0
                         targetBox.position.y = 2
                         targetBox.position.z = 3
-                        
+
                         targetBox.rotation.y = Math.PI
-                        
+
                         // Model veya sahne yüklenirken hedef objeyi ekle:
                         hittables.push(targetBox); // targetBox zaten referansın var
 
