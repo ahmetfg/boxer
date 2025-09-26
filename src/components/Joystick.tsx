@@ -5,7 +5,7 @@ const JOYSTICK_SIZE = 200;
 const THUMB_SIZE = 100;
 const MAX_DISTANCE = (JOYSTICK_SIZE - THUMB_SIZE) / 2;
 
-const Joystick = ({ onChange }) => {
+const Joystick = ({ onChange, forceRotate }) => {
   const joystickRef = useRef(null);
   const activePointerIdRef = useRef(null);
   const positionRef = useRef({ x: 0, y: 0 });
@@ -171,7 +171,10 @@ const Joystick = ({ onChange }) => {
           /* Yarım genişlik/yükseklik ofseti */
           marginLeft: 'calc(-1 * var(--vvh) * 0.05)',
           marginTop: 'calc(-1 * var(--vvh) * 0.05)',
-          transform: `translate(${position.x}px, ${position.y}px)`,
+          // transform: `translate(${position.x}px, ${position.y}px)`,
+          // transform: `translate(${position.y}px, ${-position.x}px)`,
+          // transform: `translate(${ forceRotate ? position.y : position.x }px, ${forceRotate ? -position.x : position.y }px)`,
+          transform: forceRotate ? `translate(${position.y}px, ${-position.x}px)` :`translate(${position.x}px, ${position.y}px)`,
           touchAction: 'none',
         }}
       />

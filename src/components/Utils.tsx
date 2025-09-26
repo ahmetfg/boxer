@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import * as THREE from 'three';
 
 
@@ -21,7 +22,9 @@ export function initThreeJsSceneAndSphere(options = {}) {
     _renderer,
     rotationSpeed: rotSpeed = 0.005,
     sphereColor = 0x0077ff,
-    wireframe = true
+    wireframe = true,
+    forceRotate = {},
+    onRotate = () => { }
   } = options;
 
   // Global değişkenlere ata
@@ -31,7 +34,7 @@ export function initThreeJsSceneAndSphere(options = {}) {
 
   // Küre oluştur
   const geometry = new THREE.SphereGeometry(10, 2, 2);
-  const material = new THREE.MeshPhongMaterial({ color: sphereColor, wireframe });
+  const material = new THREE.MeshPhongMaterial({ color: sphereColor, wireframe, opacity: 0, transparent: true });
   sphere = new THREE.Mesh(geometry, material);
 
   // Unity tarzı X ölçeği negatif, pozisyon (0,0,0)
@@ -45,15 +48,19 @@ export function initThreeJsSceneAndSphere(options = {}) {
   scene.add(sphere);
 
   // Fare ve dokunma olay dinleyicilerini ekle
-  addEventListeners();
+  var cleaner = addEventListeners({ forceRotate, onRotate });
 
   return sphere;
 }
 
 
-function addEventListeners() {
+function addEventListeners({_forceRotate, onRotate}) {
   const dom = renderer.domElement;
-
+  var forceRotate = _forceRotate ?? false
+    onRotate.current = ((f) => {
+      forceRotate = f
+      // alert(forceRotate)
+  })
   // 1) Canvas'ta tarayıcı scroll/zoom/çeviri hareketlerini kapat
   dom.style.touchAction = 'none';
   dom.style.userSelect = 'none';
@@ -104,12 +111,97 @@ function addEventListeners() {
     const deltaX = e.clientX - prevPos.x;
     const deltaY = e.clientY - prevPos.y;
 
-    sphere.rotation.y -= deltaX * rotationSpeed;
-    sphere.rotation.x += deltaY * rotationSpeed;
+    if (forceRotate) {
+      sphere.rotation.y -= deltaY * rotationSpeed;
+      sphere.rotation.x -= deltaX * rotationSpeed;
+    }else{
+      sphere.rotation.y -= deltaX * rotationSpeed;
+      sphere.rotation.x += deltaY * rotationSpeed;
+    }
 
     prevPos = { x: e.clientX, y: e.clientY };
   }, false);
+  return ()=>{}
+  
 }
+// function addEventListeners({ forceRotate }) {
+//   const dom = renderer.domElement;
+
+//   // 1) Canvas'ta tarayıcı scroll/zoom/çeviri hareketlerini kapat
+//   dom.style.touchAction = 'none';
+//   dom.style.userSelect = 'none';
+
+//   const onTouchMove = () => (e) => {
+//     e.preventDefault();
+//   }
+
+//   // 2) Gerekirse tüm sayfa touch-move'larını da durdur
+//   window.addEventListener('touchmove', onTouchMove, { passive: false });
+
+//   let isDraggingSphere = false;
+//   let spherePointerId: number | null = null;
+//   let prevPos = { x: 0, y: 0 };
+
+//   const onPointerDown = () => (e) => {
+//     if (e.pointerType === 'mouse' || e.pointerType === 'touch') {
+//       isDraggingSphere = true;
+//       spherePointerId = e.pointerId;
+//       prevPos = { x: e.clientX, y: e.clientY };
+//       dom.setPointerCapture(spherePointerId);
+//     }
+//   }
+//   // Başlangıç: fare veya touch ile basıldığında işleme al
+//   dom.addEventListener('pointerdown', onPointerDown, false);
+
+//   const onPointerUp = () => (e) => {
+//     if (e.pointerId === spherePointerId) {
+//       isDraggingSphere = false;
+//       if (spherePointerId !== null) {
+//         dom.releasePointerCapture(spherePointerId);
+//         spherePointerId = null;
+//       }
+//     }
+//   }
+//   // Bırakıldığında bırak
+//   dom.addEventListener('pointerup', onPointerUp, false);
+
+//   const onPointerCancel = () => (e) => {
+//     if (e.pointerId === spherePointerId) {
+//       isDraggingSphere = false;
+//       dom.releasePointerCapture(e.pointerId);
+//       spherePointerId = null;
+//     }
+//   }
+//   // Sistem iptali gibi durumlara karşı da bırak
+//   dom.addEventListener('pointercancel', onPointerCancel, false);
+
+//   const onPointerMove = () => (e) => {
+//     if (!isDraggingSphere || e.pointerId !== spherePointerId) return;
+
+//     const deltaX = e.clientX - prevPos.x;
+//     const deltaY = e.clientY - prevPos.y;
+
+//     if (forceRotate) {
+//       sphere.rotation.y -= deltaY * rotationSpeed;
+//       sphere.rotation.x -= deltaX * rotationSpeed;
+//     } else {
+//       sphere.rotation.y -= deltaX * rotationSpeed;
+//       sphere.rotation.x += deltaY * rotationSpeed;
+//     }
+
+//     prevPos = { x: e.clientX, y: e.clientY };
+//   }
+//   // Hareketi takip et ve küreyi döndür
+//   dom.addEventListener('pointermove', onPointerMove, false);
+
+//   return () => {
+//       window.removeEventListener('touchmove', onTouchMove);
+//       dom.removeEventListener('pointerdown', onPointerDown);
+//       dom.removeEventListener('pointerup', onPointerUp);
+//       dom.removeEventListener('pointercancel', onPointerCancel);
+//       dom.removeEventListener('pointermove', onPointerMove);
+//   }
+// }
 
 
 export class SpineAimController {
@@ -126,7 +218,7 @@ export class SpineAimController {
   constructor({
     spineBone,
     rifle,
-    rifleRotationTarget = null,
+    rifleRotationTarget,
     target,
     offset = new THREE.Vector3(),
     rifleOffset = new THREE.Vector3(),
@@ -265,7 +357,9 @@ export default addPositionSlidersToGUI;
 export function AddSphere(scene, radius = 1, color = 0xffff005, widthSegments = 32, heightSegments = 16) {
   const geometry = new THREE.SphereGeometry(radius, widthSegments, heightSegments);
   const material = new THREE.MeshBasicMaterial({
-    color: color
+    color: color,
+    transparent: true,
+    opacity: 0,
   });
   const sphere = new THREE.Mesh(geometry, material);
   sphere.name = "aimTarget"
@@ -315,7 +409,7 @@ export function lookAtYawOnly(object, targetPos) {
 // Utils.tsx dosyasının sonuna veya ThreeAim.jsx tepeye ekleyin
 export function clipOnlyUpperBody(originalClip: THREE.AnimationClip) {
   const UPPER_PARTS = [
-    'ForeArm','Head'
+    'ForeArm', 'Head'
   ];               // anahtar kelime listesi – gerektiğinde genişletin
 
   const filteredTracks = originalClip.tracks.filter(track =>
@@ -335,7 +429,7 @@ export class LerpManager {
   action = null
   get = null
   last = null
-  newWeight = 0
+  newWeight = null
   lerpFactor = 0.5
   ids = []
 
@@ -350,23 +444,34 @@ export class LerpManager {
     this.newWeight = newWeight
     this.lerpFactor = lerpFactor
   }
+
   clear() {
     for (let i = 0; i < this.ids.length; i++) {
       clearTimeout(this.ids[i])
     }
   }
 
-  update() {
+  update(throttle = false) {
     if (this.action == null || this.get == null) return
     if (this.newWeight == null) return
+    if (this.last == null) {
+      this.last = this.get()
+    }
 
     this.last = THREE.MathUtils.lerp(
       this.last,
       this.newWeight,
       this.lerpFactor
     )
+    // console.log(this.last, this.newWeight)
 
-    this.action(this.last)
+    if (!throttle) {
+      this.action(this.last)
+    } else {
+      if (this.last != this.newWeight) {
+        this.action(this.last)
+      }
+    }
   }
 }
 
@@ -402,15 +507,15 @@ export class FabrikLeftArm {
     for (let step = 0; step < this.iters; step++) {
       /* Zinciri geriden (dirsek) öne (omuz) çöz – sadece 2 kemik */
       for (let i = 1; i >= 0; i--) {
-        const bone   = this.chain[i];
+        const bone = this.chain[i];
         const parent = bone.parent!;
 
         /* Parent world matrisini tazele (tek sefer yetecek) */
         parent.updateWorldMatrix(true, false);
 
         /* === dünya uzayında vektörler === */
-        const bonePos   = bone.getWorldPosition(this.tmpV1);    // tmpV1
-        const effector  = wrist.getWorldPosition(this.tmpV2);   // tmpV2
+        const bonePos = bone.getWorldPosition(this.tmpV1);    // tmpV1
+        const effector = wrist.getWorldPosition(this.tmpV2);   // tmpV2
         const targetPos = this.target.getWorldPosition(this.tmpV3); // tmpV3
 
         const vToEff = this.tmpV2.subVectors(effector, bonePos).normalize();
@@ -427,8 +532,8 @@ export class FabrikLeftArm {
         this.parentQInv.copy(this.parentQ).invert();
 
         this.qLocal.copy(this.parentQInv)
-                   .multiply(this.qWorld)
-                   .multiply(this.parentQ);
+          .multiply(this.qWorld)
+          .multiply(this.parentQ);
 
         /* Uygula */
         bone.quaternion.premultiply(this.qLocal);
@@ -492,6 +597,8 @@ export class MuzzleFlashAnimator {
     this.sprite.visible = false;
     this.rifle.add(this.sprite);
   }
+
+
 
   /** Animasyonu başlatır */
   public play() {
@@ -586,34 +693,34 @@ export class FabrikLeftArm2 {
     for (let step = 0; step < this.iters; step++) {
       /* zinciri geriden (dirsek) öne (omuz) çöz */
       for (let i = this.chain.length - 2; i >= 0; i--) {
-        const bone   = this.chain[i];
+        const bone = this.chain[i];
         const parent = bone.parent!;
-      
+
         parent.updateWorldMatrix(true, false);
-      
-        const bonePos   = bone.getWorldPosition(this.tmpV1);   // tmpV1
-        const effector  = wrist.getWorldPosition(this.tmpV2);  // tmpV2
+
+        const bonePos = bone.getWorldPosition(this.tmpV1);   // tmpV1
+        const effector = wrist.getWorldPosition(this.tmpV2);  // tmpV2
         const targetPos = this.target.getWorldPosition(this.tmpV3); // tmpV3 NEW
-      
+
         const vToEff = this.tmpV2.subVectors(effector, bonePos).normalize();
         const vToTgt = this.tmpV3.subVectors(targetPos, bonePos).normalize();
-      
+
         if (vToEff.dot(vToTgt) > 0.999) continue;
-      
+
         this.qWorld.setFromUnitVectors(vToEff, vToTgt);
-      
+
         parent.getWorldQuaternion(this.parentQ);
         this.parentQInv.copy(this.parentQ).invert();
-      
+
         this.qLocal.copy(this.parentQInv)
-                   .multiply(this.qWorld)
-                   .multiply(this.parentQ);
-      
+          .multiply(this.qWorld)
+          .multiply(this.parentQ);
+
         bone.quaternion.premultiply(this.qLocal);
         bone.updateMatrix();
         parent.updateWorldMatrix(true, true);
       }
-      
+
 
       /* yakınlaştıysak erken çık */
       // if (
@@ -621,5 +728,234 @@ export class FabrikLeftArm2 {
       //        .distanceTo(this.target.getWorldPosition(this.tmpV2)) < 0.002
       // ) break;
     }
+  }
+}
+
+
+
+type SceneEntry = {
+  scene: THREE.Scene
+  renderer: THREE.WebGLRenderer
+  mixers: THREE.AnimationMixer[]
+}
+
+export class SceneManager {
+  private static _instance: SceneManager
+  registry = new Map<THREE.Scene, SceneEntry>()
+
+  private constructor() { }
+
+  static get instance(): SceneManager {
+    if (!SceneManager._instance) {
+      SceneManager._instance = new SceneManager()
+    }
+    return SceneManager._instance
+  }
+
+  /**
+   * Yeni bir sahne kaydı oluştur.
+   */
+  register(
+    scene: THREE.Scene,
+    renderer: THREE.WebGLRenderer,
+    mixers: THREE.AnimationMixer[] = []
+  ) {
+    this.registry.set(scene, { scene, renderer, mixers })
+  }
+
+  /**
+   * Sahne kaydını sil.
+   */
+  unregister(scene: THREE.Scene) {
+    this.registry.delete(scene)
+  }
+
+  /**
+   * Kayıttaki tüm sahne girişlerini dispose et ve kayıttan temizle.
+   * Ayrıca temizleme öncesi kayıtlı sahne sayısını konsola yazdırır.
+   */
+  disposeAll() {
+    console.log(
+      `Disposing all scenes: ${this.registry.size} scene(s) registered.`
+    )
+    this.registry.forEach(({ scene, renderer, mixers }) => {
+      this.disposeScene(scene, renderer, mixers)
+      this.registry.delete(scene)
+    })
+  }
+
+  /**
+   * Yalnızca en son eklenen sahneyi bırakıp diğer tüm sahneleri dispose et ve kayıttan sil.
+   */
+  disposeAllExceptLast() {
+    const total = this.registry.size
+    if (total <= 1) return
+
+    console.log(`Disposing ${total - 1} scene(s), keeping the last one.`)
+    const keys = Array.from(this.registry.keys())
+    const lastKey = keys[keys.length - 1]
+
+    // İlk kayıtları sil
+    keys.slice(0, -1).forEach((scene) => {
+      const entry = this.registry.get(scene)
+      if (entry) {
+        this.disposeScene(entry.scene, entry.renderer, entry.mixers)
+        this.registry.delete(scene)
+      }
+    })
+  }
+  /**
+   * Yalnızca en son eklenen sahneyi bırakıp diğer tüm sahneleri dispose et ve kayıttan sil.
+   */
+  disposeAllExceptFirst() {
+    const total = this.registry.size
+    if (total <= 1) return
+
+    console.log(`Disposing ${total - 1} scene(s), keeping the first one.`)
+    const keys = Array.from(this.registry.keys())
+
+    // İlk kayıt hariç tümünü sil
+    keys.slice(1).forEach((scene) => {
+      const entry = this.registry.get(scene)
+      if (entry) {
+        this.disposeScene(entry.scene, entry.renderer, entry.mixers)
+        this.registry.delete(scene)
+      }
+    })
+  }
+
+  /**
+   * Sadece tek bir sahne girişini dispose et.
+   */
+  disposeSceneEntry(scene: THREE.Scene) {
+    const entry = this.registry.get(scene)
+    if (!entry) return
+    this.disposeScene(entry.scene, entry.renderer, entry.mixers)
+    this.registry.delete(scene)
+  }
+  disposeScene(scene, renderer, mixers = []) {
+    if (!scene) return;
+    if (!renderer) return;
+    // 1. Animasyonları durdur ve mixer önbelleğini temizle
+    mixers.forEach((mixer) => {
+      mixer.stopAllAction()
+      // Eğer birden fazla mixer aynı kökü paylaşıyorsa:
+      mixer.uncacheRoot(mixer.getRoot())
+    })
+
+    // 2. Sahnedeki tüm objeleri gez
+    scene.traverse((obj) => {
+      // 2.a. Mesh objeleri için
+      if (obj.isMesh) {
+        // Geometriyi dispose et
+        if (obj.geometry) {
+          obj.geometry.dispose()
+        }
+        // Materyalleri dispose et (Array veya tek materyal olabilir)
+        if (obj.material) {
+          const disposeMaterial = (material) => {
+            // Doku varsa dispose et
+            for (const key in material) {
+              const value = material[key]
+              if (value && typeof value.dispose === "function") {
+                value.dispose()
+              }
+            }
+            material.dispose()
+          }
+
+          if (Array.isArray(obj.material)) {
+            obj.material.forEach(disposeMaterial)
+          } else {
+            disposeMaterial(obj.material)
+          }
+        }
+      }
+
+      // 2.b. Diğer dispose edilmesi gereken tipler (örneğin SkeletonHelper)
+      if (obj.isSkeletonHelper && obj.geometry) {
+        obj.geometry.dispose()
+      }
+
+      // SceneManager.deepDispose(scene,obj)
+    })
+
+    try {
+      scene.traverse((obj) => {
+        SceneManager.deepDispose(scene, obj)
+      })
+
+    } catch (error) {
+
+    }
+
+    // 3. Scene grafiğinden tüm çocukları çıkar
+    while (scene.children.length > 0) {
+      scene.remove(scene.children[0])
+    }
+
+    // 4. Renderer'ı dispose et
+    renderer.dispose()
+
+    console.log("Scene ve renderer temizlendi.")
+  }
+
+  // ==== MEMORY MANAGEMENT ====
+  // Deep dispose
+  static deepDispose(scene, node) {
+    if (!node) return;
+    if (!scene) return;
+
+    // Traverse the hierarchy and dispose of resources
+    node.traverse(obj => {
+      if (obj.geometry) {
+        obj.geometry.dispose();
+        obj.geometry = undefined;
+      }
+
+      if (obj.material) {
+        if (Array.isArray(obj.material)) {
+          obj.material.forEach(material => disposeResources(material));
+        } else {
+          disposeResources(obj.material);
+        }
+        obj.material = undefined;
+      }
+    });
+
+    // Remove the node from its parent and the scene
+    if (node.parent) {
+      node.parent.remove(node);
+    }
+
+    // Helper function to dispose of material and its maps
+    function disposeResources(material) {
+      if (!material) return;
+
+      const textureMaps = [
+        'alphaMap', 'aoMap', 'blendDstAlpha', 'blendEquationAlpha', 'blendSrcAlpha',
+        'bumpMap', 'displacementMap', 'emissiveMap', 'envMap', 'lightMap',
+        'map', 'metalnessMap', 'normalMap', 'roughnessMap', 'specularMap', 'gradientMap'
+      ];
+
+      textureMaps.forEach(mapName => {
+        if (material[mapName] && typeof material[mapName].dispose === 'function') {
+          material[mapName].dispose();
+          if (material[mapName].source && scene) {
+            const objectToRemove = scene.getObjectById(material[mapName].source.uuid);
+            if (objectToRemove) {
+              scene.remove(objectToRemove);
+            }
+          }
+          material[mapName] = undefined;
+        }
+      });
+
+      // Finally, dispose the material itself
+      if (typeof material.dispose === 'function') {
+        material.dispose();
+      }
+    }
+    node = undefined;
   }
 }

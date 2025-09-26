@@ -1,49 +1,403 @@
 // src/components/ThreeScene.jsx
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import * as THREE from 'three';
-import addPositionSlidersToGUI, * as utils from './Utils.tsx';
+import * as utils from './Utils.tsx';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader';
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls';
 import { GUI, color } from 'dat.gui';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import Joystick from './Joystick.tsx'; // Joystick bileşenini import et
 const BASE = process.env.PUBLIC_URL;  // → "/boxer"
-console.log("zort", BASE)
-var player: THREE.Object3D;
-var deltaTime;
-var idleFireAction: THREE.AnimationAction;
-var idleAction: THREE.AnimationAction;
-var idleChrouchAction: THREE.AnimationAction;
 
-var walkBackAction: THREE.AnimationAction;
-var walkForwardAction: THREE.AnimationAction;
-var walkLeftAction: THREE.AnimationAction;
-var walkRightAction: THREE.AnimationAction;
-
-var runBackAction: THREE.AnimationAction;
-var runForwardAction: THREE.AnimationAction;
-var runLeftAction: THREE.AnimationAction;
-var runRightAction: THREE.AnimationAction;
-
-var chrouchBackAction: THREE.AnimationAction;
-var chrouchForwardAction: THREE.AnimationAction;
-var chrouchLeftAction: THREE.AnimationAction;
-var chrouchRightAction: THREE.AnimationAction;
-
+var deltaTime: number;
 var muzzle: utils.MuzzleFlashAnimator
 let fireWeight = 0;   // anlık ağırlık
 let fireTarget = 0;   // hedef ağırlık (0 veya 1)
 const FIRE_LERP_K = 20;   // hız katsayısı (büyüdükçe daha hızlı)
 // Hedefleri tek bir yerde topla
-const hittables: THREE.Object3D[] = [];
 var targetBox
-
+var fovController = new utils.LerpManager()
 // Kontrol için bir ayarlar nesnesi oluşturalım
 const settings = {
     transitionX: 0.0, // 0'dan 1'e kadar gidecek slider değeri
     transitionY: 0.0 // 0'dan 1'e kadar gidecek slider değeri
 };
+
+class Player {
+    player: THREE.Object3D;
+    playerSurface: THREE.Object3D;
+    idleFireAction: THREE.AnimationAction;
+    idleAction: THREE.AnimationAction;
+    idleChrouchAction: THREE.AnimationAction;
+
+    walkBackAction: THREE.AnimationAction;
+    walkForwardAction: THREE.AnimationAction;
+    walkLeftAction: THREE.AnimationAction;
+    walkRightAction: THREE.AnimationAction;
+
+    runBackAction: THREE.AnimationAction;
+    runForwardAction: THREE.AnimationAction;
+    runLeftAction: THREE.AnimationAction;
+    runRightAction: THREE.AnimationAction;
+
+    chrouchBackAction: THREE.AnimationAction;
+    chrouchForwardAction: THREE.AnimationAction;
+    chrouchLeftAction: THREE.AnimationAction;
+    chrouchRightAction: THREE.AnimationAction;
+
+    rifle: THREE.Object3D;
+    rightHand: THREE.Object3D;
+    spine: THREE.Object3D;
+    hips: THREE.Object3D;
+    spineController: utils.SpineAimController
+    rifleOffset = new THREE.Vector3(26.76, 110.1, 13.96)
+    // aimSpineOffset = new THREE.Vector3(-4, -43.67, 0)
+    aimSpineOffset = new THREE.Vector3(0, -48, 0)
+    riflePositionOffset = new THREE.Vector3(3.59, 7.86, 3.23)
+    aimSphere;
+    aimTarget;
+    leftArmIK;
+    idleActionLerp = new utils.LerpManager();
+    idleChrouchActionLerp = new utils.LerpManager();
+
+    scene: THREE.Scene;
+    mixer: THREE.AnimationMixer;
+    camera: THREE.PerspectiveCamera;
+
+    isRunningRef: React.RefObject<boolean | null>
+    isChrouchingRef: React.RefObject<boolean | null>
+    deltaTime: number;
+    clock: any;
+    puppet: boolean;
+    renderer: THREE.WebGLRenderer;
+
+    //damageEffect: 
+
+    constructor(scene: THREE.Scene, renderer: THREE.WebGLRenderer, camera: THREE.PerspectiveCamera, puppet: boolean = false) {
+        this.scene = scene
+        this.renderer = renderer
+        this.camera = camera
+        this.clock = new THREE.Clock()
+        this.puppet = puppet
+
+        if (!puppet) {
+            this.aimSphere = utils.initThreeJsSceneAndSphere({
+                _scene: this.scene,
+                _renderer: this.renderer,
+                rotationSpeed: 0.004,
+                sphereColor: 0xffffff00,
+                wireframe: false
+            });
+    
+            // Target
+            this.aimTarget = utils.AddSphere(this.aimSphere, .1, 0xffffff00)
+            this.aimTarget.position.z = 10
+        }else{
+            // Target
+            this.aimTarget = utils.AddSphere(this.scene, .1, 0xffffff00)
+            this.aimTarget.position.z = 10
+        }
+    }
+
+    initialize() {
+        return new Promise((resolve, reject) => {
+            new GLTFLoader().load(
+                // `${BASE}/models/aimDummyGunTest.glb`,
+                `${BASE}/models/aimDummy.glb`,
+                gltf => {
+
+                    const model = SkeletonUtils.clone(gltf.scene);
+                    this.scene.add(model);
+
+                    // Animation mixer
+                    this.mixer = new THREE.AnimationMixer(model);
+
+                    // idleAction = mixer.clipAction(gltf.animations[2]);
+                    this.idleAction = this.mixer.clipAction(gltf.animations.find(clip => clip.name === 'Idle'));
+                    this.idleFireAction = this.mixer.clipAction(gltf.animations.find(clip => clip.name === 'IdleFire'));
+                    this.idleChrouchAction = this.mixer.clipAction(gltf.animations.find(clip => clip.name === 'IdleCrouch'));
+
+                    const idleFireUpperClip = utils.clipOnlyUpperBody(this.idleFireAction.getClip());   // ← yeni
+                    const idleFireUpperAction = this.mixer.clipAction(idleFireUpperClip);     // ← yeni
+                    idleFireUpperAction.setEffectiveWeight(0);                            // başlangıçta kapalı
+                    idleFireUpperAction.play();
+                    this.idleFireAction.clampWhenFinished = false;
+
+                    // Eski idleFireAction değişkenine artık gerek yok,
+                    // ama kodun geri kalanını bozmamak için şöyle güncelleyin:
+                    this.idleFireAction = idleFireUpperAction;
+
+                    this.walkBackAction = this.mixer.clipAction(gltf.animations.find(clip => clip.name === 'WalkBack'));//5
+                    this.walkForwardAction = this.mixer.clipAction(gltf.animations.find(clip => clip.name === 'WalkForward'));//6
+                    this.walkLeftAction = this.mixer.clipAction(gltf.animations.find(clip => clip.name === 'WalkLeft'));//7
+                    this.walkRightAction = this.mixer.clipAction(gltf.animations.find(clip => clip.name === 'WalkRight'));//8
+
+                    this.runBackAction = this.mixer.clipAction(gltf.animations.find(clip => clip.name === 'RunBack'));//0
+                    this.runForwardAction = this.mixer.clipAction(gltf.animations.find(clip => clip.name === 'RunForward'));//1
+                    this.runLeftAction = this.mixer.clipAction(gltf.animations.find(clip => clip.name === 'RunLeft'));//3
+                    this.runRightAction = this.mixer.clipAction(gltf.animations.find(clip => clip.name === 'RunRight'));//4
+
+                    this.chrouchBackAction = this.mixer.clipAction(gltf.animations.find(clip => clip.name === 'BackCrouch'));//0
+                    this.chrouchForwardAction = this.mixer.clipAction(gltf.animations.find(clip => clip.name === 'ForwardCrouch'));//1
+                    this.chrouchLeftAction = this.mixer.clipAction(gltf.animations.find(clip => clip.name === 'LeftCrouch'));//3
+                    this.chrouchRightAction = this.mixer.clipAction(gltf.animations.find(clip => clip.name === 'RightCrouch'));//4
+
+                    this.idleAction.setEffectiveWeight(0)
+                    this.idleFireAction.setEffectiveWeight(0)
+                    this.idleChrouchAction.setEffectiveWeight(0)
+
+                    this.walkBackAction.setEffectiveWeight(0)
+                    this.walkForwardAction.setEffectiveWeight(0)
+                    this.walkLeftAction.setEffectiveWeight(0)
+                    this.walkRightAction.setEffectiveWeight(0)
+
+                    this.runBackAction.setEffectiveWeight(0)
+                    this.runForwardAction.setEffectiveWeight(0)
+                    this.runLeftAction.setEffectiveWeight(0)
+                    this.runRightAction.setEffectiveWeight(0)
+
+                    this.chrouchBackAction.setEffectiveWeight(0)
+                    this.chrouchForwardAction.setEffectiveWeight(0)
+                    this.chrouchLeftAction.setEffectiveWeight(0)
+                    this.chrouchRightAction.setEffectiveWeight(0)
+
+                    this.idleFireAction.setEffectiveTimeScale(2)
+                    this.walkForwardAction.setEffectiveTimeScale(1.5)
+                    this.walkBackAction.setEffectiveTimeScale(1.5)
+                    this.runForwardAction.setEffectiveTimeScale(.9)
+                    this.runRightAction.setEffectiveTimeScale(.6)
+                    this.runLeftAction.setEffectiveTimeScale(.8)
+
+                    this.idleAction.play()
+                    this.idleFireAction.play()
+                    this.idleChrouchAction.play()
+                    this.walkBackAction.play()
+                    this.walkForwardAction.play()
+                    this.walkLeftAction.play()
+                    this.walkRightAction.play()
+
+                    this.runBackAction.play();
+                    this.runForwardAction.play();
+                    this.runLeftAction.play();
+                    this.runRightAction.play();
+
+                    this.chrouchBackAction.play();
+                    this.chrouchForwardAction.play();
+                    this.chrouchLeftAction.play();
+                    this.chrouchRightAction.play();
+
+                    this.idleActionLerp.setActions((x: number) => this.idleAction.setEffectiveWeight(x), () => this.idleAction.getEffectiveWeight())
+                    this.idleChrouchActionLerp.setActions((x: number) => this.idleChrouchAction.setEffectiveWeight(x), () => this.idleChrouchAction.getEffectiveWeight())
+
+                    this.rifle = model.getObjectByName("Rifle") as THREE.Object3D;
+                    
+                    if (!this.puppet) {
+                        muzzle = new utils.MuzzleFlashAnimator(this.rifle, [
+                            `${BASE}/textures/shoot1.png`,
+                            `${BASE}/textures/shoot2.png`,
+                            `${BASE}/textures/shoot3.png`,
+                            `${BASE}/textures/shoot4.png`,
+                            `${BASE}/textures/shoot5.png`,
+                        ], 50, true, true);
+                    }
+
+                    this.rightHand = model.getObjectByName("mixamorigRightHand") as THREE.Object3D;
+                    this.rightHand.attach(this.rifle);
+
+                    this.spine = model.getObjectByName("mixamorigSpine") as THREE.Object3D;
+                    this.hips = model.getObjectByName("mixamorigHips") as THREE.Object3D;
+                    this.player = model.getObjectByName("Right") as THREE.Object3D;
+                    this.playerSurface = model.getObjectByName("Alpha_Surface") as THREE.Object3D;
+                    
+                    if (!this.puppet) {
+                        this.aimSphere.attach(this.camera)
+                        this.camera.position.setX(this.camera.position.x - .2)
+                        this.camera.position.setY(this.camera.position.y + .1)
+                    }
+                    // hide floor
+                    const floor = model.getObjectByName("Floor") as THREE.Object3D;
+                    floor.visible = false
+
+
+                    this.spineController = new utils.SpineAimController({
+                        spineBone: this.spine,
+                        rifle: this.rifle,
+                        rifleRotationTarget: this.rightHand,
+                        target: this.aimTarget,
+                        offset: this.aimSpineOffset,
+                        rifleOffset: this.rifleOffset,
+                    })
+                    this.leftArmIK = new utils.FabrikLeftArm(
+                        {
+                            shoulder: model.getObjectByName('mixamorigLeftArm') as THREE.Bone,
+                            elbow: model.getObjectByName('mixamorigLeftForeArm') as THREE.Bone,
+                            wrist: model.getObjectByName('mixamorigLeftHand') as THREE.Bone,
+                        },
+                        this.rifle.getObjectByName('ForeGripTarget')!,   // Rifle üstüne boş bir boşluk / empty ekleyin
+                        2,                                          // iterations
+                    );
+
+                    if (!this.puppet) {
+                        utils.SceneManager.instance.register(this.scene, this.renderer, [this.mixer])
+                    }
+                    resolve(null)
+
+                },
+                xhr => console.log(`Loading: ${(xhr.loaded / xhr.total * 100).toFixed(1)}%`),
+                err => {
+                    console.error('Error loading model:', err)
+                    reject(err)
+                });
+        })
+    }
+
+    getIdleWeight(x, y) {
+        // Maksimum uzaklık (X ve Y'nin en fazla 1 olabileceğini varsayarsak)
+        // Bu değer, (1,1) noktasının (0,0)'a olan uzaklığıdır: sqrt(1^2 + 1^2) = sqrt(2) ≈ 1.414
+        const maxDistance = 1.0; // Sliderlarımız 0-1 aralığında olduğu için, 1.0'ı maksimum kabul edebiliriz.
+        // Eğer (1,1) noktasının tam uzaklığını kullanmak istersek Math.sqrt(2) olmalı.
+        // Basitlik için ve slider aralığıyla uyumlu olması için 1.0 ideal.
+
+        // (0,0) noktasına olan uzaklığı hesapla
+        const distance = Math.sqrt(x * x + y * y);
+
+        // Uzaklığı normalize et (0 ile 1 arasına getir)
+        const normalizedDistance = THREE.MathUtils.clamp(distance / maxDistance, 0, 1);
+
+        // Idle ağırlığını hesapla: Uzaklık arttıkça ağırlık azalır
+        const idleWeight = 1.0 - normalizedDistance;
+
+        // Ağırlığın 0 ile 1 arasında olduğundan emin ol
+        return THREE.MathUtils.clamp(idleWeight, 0, 1);
+    }
+
+    onAnimate() {
+        this.deltaTime = this.clock.getDelta()
+        if (this.mixer) this.mixer.update(this.deltaTime);
+
+        // find gun
+        if (this.rifle) {
+            if (this.rightHand) {
+                //rightHand.getWorldPosition(rifle.position.add(riflePositionOffset));
+                //rifle.position = riflePositionOffset;
+                this.rifle.position.x = this.riflePositionOffset.x;
+                this.rifle.position.y = this.riflePositionOffset.y;
+                this.rifle.position.z = this.riflePositionOffset.z;
+
+                this.rifle.rotation.x = this.rifleOffset.x;
+                this.rifle.rotation.y = this.rifleOffset.y;
+                this.rifle.rotation.z = this.rifleOffset.z;
+
+                if (!this.puppet) {
+                    this.player.getWorldPosition(this.aimSphere.position)
+                }
+                // player.getWorldPosition(camera.position)
+                //mount.clientWidth < 1000 ? -1 :
+                // camera.position.add(new THREE.Vector3(-1, 1.5, -2.5));
+                // camera.position.add(new THREE.Vector3(mount.clientWidth < 1000 ? -.5 : -1, 1.381, -1.9));
+            }
+        }
+
+        // idleAction?.setEffectiveWeight(getIdleWeight(settings.transitionX, settings.transitionY));
+        this.idleActionLerp?.push(this.getIdleWeight(settings.transitionX, settings.transitionY), 1);
+
+        if (this.isChrouchingRef.current) {
+            // yürüyüşü sıfırla
+            this.walkLeftAction?.setEffectiveWeight(0);
+            this.walkRightAction?.setEffectiveWeight(0);
+            this.walkBackAction?.setEffectiveWeight(0);
+            this.walkForwardAction?.setEffectiveWeight(0);
+            // idleAction?.setEffectiveWeight(0);
+            this.idleActionLerp?.push(0);
+
+            // koşu animasyonları
+            this.chrouchLeftAction?.setEffectiveWeight(-THREE.MathUtils.clamp(settings.transitionX, -1, 0));
+            this.chrouchRightAction?.setEffectiveWeight(THREE.MathUtils.clamp(settings.transitionX, 0, 1));
+            this.chrouchBackAction?.setEffectiveWeight(-THREE.MathUtils.clamp(settings.transitionY, -1, 0));
+            this.chrouchForwardAction?.setEffectiveWeight(THREE.MathUtils.clamp(settings.transitionY, 0, 1));
+            // idleChrouchAction?.setEffectiveWeight(getIdleWeight(settings.transitionX, settings.transitionY));
+            this.idleChrouchActionLerp?.push(this.getIdleWeight(settings.transitionX, settings.transitionY), 1);
+            this.aimSpineOffset.x = 10
+
+        } else {
+            this.aimSpineOffset.x = -4
+
+            this.chrouchLeftAction?.setEffectiveWeight(0);
+            this.chrouchRightAction?.setEffectiveWeight(0);
+            this.chrouchBackAction?.setEffectiveWeight(0);
+            this.chrouchForwardAction?.setEffectiveWeight(0);
+            // idleChrouchAction?.setEffectiveWeight(0);
+            this.idleChrouchActionLerp?.push(0);
+
+            // eski yürüyüş mantığınız
+            this.walkLeftAction?.setEffectiveWeight(-THREE.MathUtils.clamp(settings.transitionX, -1, 0));
+            this.walkRightAction?.setEffectiveWeight(THREE.MathUtils.clamp(settings.transitionX, 0, 1));
+            // idleAction?.setEffectiveWeight(getIdleWeight(settings.transitionX, settings.transitionY));
+            this.walkBackAction?.setEffectiveWeight(-THREE.MathUtils.clamp(settings.transitionY, -1, 0));
+            this.walkForwardAction?.setEffectiveWeight(THREE.MathUtils.clamp(settings.transitionY, 0, 1));
+
+            if (this.isRunningRef.current) {
+                // yürüyüşü sıfırla
+                this.walkLeftAction?.setEffectiveWeight(0);
+                this.walkRightAction?.setEffectiveWeight(0);
+                this.walkBackAction?.setEffectiveWeight(0);
+                this.walkForwardAction?.setEffectiveWeight(0);
+                // idleAction?.setEffectiveWeight(0);
+                // koşu animasyonları
+                this.runLeftAction?.setEffectiveWeight(-THREE.MathUtils.clamp(settings.transitionX, -1, 0));
+                this.runRightAction?.setEffectiveWeight(THREE.MathUtils.clamp(settings.transitionX, 0, 1));
+                this.runBackAction?.setEffectiveWeight(-THREE.MathUtils.clamp(settings.transitionY, -1, 0));
+                this.runForwardAction?.setEffectiveWeight(THREE.MathUtils.clamp(settings.transitionY, 0, 1));
+            } else {
+                this.runLeftAction?.setEffectiveWeight(0);
+                this.runRightAction?.setEffectiveWeight(0);
+                this.runBackAction?.setEffectiveWeight(0);
+                this.runForwardAction?.setEffectiveWeight(0);
+
+                // eski yürüyüş mantığınız
+                this.walkLeftAction?.setEffectiveWeight(-THREE.MathUtils.clamp(settings.transitionX, -1, 0));
+                this.walkRightAction?.setEffectiveWeight(THREE.MathUtils.clamp(settings.transitionX, 0, 1));
+                // idleAction?.setEffectiveWeight(getIdleWeight(settings.transitionX, settings.transitionY));
+                this.walkBackAction?.setEffectiveWeight(-THREE.MathUtils.clamp(settings.transitionY, -1, 0));
+                this.walkForwardAction?.setEffectiveWeight(THREE.MathUtils.clamp(settings.transitionY, 0, 1));
+            }
+        }
+
+        if (this.isRunningRef.current) {
+
+        } else {
+            if (!this.puppet) {
+                this.spineController?.update();
+                
+            }
+        }
+
+        // ---- Fire weight lerp ----
+        if (this.idleFireAction) {
+            fireWeight = THREE.MathUtils.lerp(
+                fireWeight,
+                fireTarget,
+                this.deltaTime * FIRE_LERP_K
+            );
+            this.idleFireAction.setEffectiveWeight(fireWeight);
+        }
+
+        this.leftArmIK?.update();
+        this.idleActionLerp?.update()
+        this.idleChrouchActionLerp?.update()
+    }
+
+    onClear(callback) {
+        this.idleActionLerp?.clear()
+        this.idleChrouchActionLerp?.clear()
+        setTimeout(() => {
+            utils.SceneManager.instance.disposeAllExceptLast()
+            console.log("clear")
+            if (callback) callback()
+        }, 3000);
+
+    }
+}
 
 export default function ThreeScene() {
     const mountRef = useRef(null);
@@ -56,8 +410,10 @@ export default function ThreeScene() {
     const isChrouchingRef = useRef(isChrouching);
     // References to core Three.js objects
     const sceneRef = useRef<THREE.Scene>(null);
+    const instance = useRef<Player>(null);
     const cameraRef = useRef<THREE.PerspectiveCamera>(null);
     const rendererRef = useRef<THREE.WebGLRenderer>(null);
+    const hittablesRef = useRef<THREE.Object3D[]>([]);
 
     useEffect(() => { isRunningRef.current = isRunning; }, [isRunning]);
     useEffect(() => { isChrouchingRef.current = isChrouching; }, [isChrouching]);
@@ -69,7 +425,7 @@ export default function ThreeScene() {
         settings.transitionX = joystickCoords.x;
         settings.transitionY = -joystickCoords.y;
 
-        moveCharacter(joystickCoords, player, isRunning ? 3 : 1.3, deltaTime)
+        moveCharacter(joystickCoords, instance.current?.player, isRunning ? 4 : 1.3, deltaTime)
     }, [joystickCoords])
 
     function moveCharacter(joystick, mesh, baseMoveSpeed, deltaTime) {
@@ -99,10 +455,10 @@ export default function ThreeScene() {
     }
 
     useEffect(() => {
+        // if (sceneRef.current == null) {
         const mount = mountRef.current;
         // Cleanup any existing canvas
         while (mount.firstChild) mount.removeChild(mount.firstChild);
-
         // Scene setup
         const scene = new THREE.Scene();
         sceneRef.current = scene
@@ -112,6 +468,19 @@ export default function ThreeScene() {
             0.1,
             1000
         );
+
+        fovController.setActions(
+            (newFov)=>{
+                if (!isNaN(newFov)) {
+                    camera.fov = newFov
+                    camera.updateProjectionMatrix()
+                }
+            },
+            ()=>{ return camera.fov },
+        )
+
+        camera.fov = 60
+
         cameraRef.current = camera;
         camera.rotation.set(-3, 0, 3.14);
         camera.position.set(-1.03, 1.3, -1.2);
@@ -124,34 +493,17 @@ export default function ThreeScene() {
         renderer.setSize(mount.clientWidth, mount.clientHeight);
         mount.appendChild(renderer.domElement);
 
-        // Controls
-        // const controls = new OrbitControls(camera, renderer.domElement);
-        // controls.enableDamping = true;
-        // controls.dampingFactor = 0.05;
-
         // Lighting
         scene.add(new THREE.AmbientLight(0xffffff, 1));
         const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
         dirLight.position.set(5, 10, 7.5);
         scene.add(dirLight);
 
-        const aimSphere = utils.initThreeJsSceneAndSphere({
-            _scene: scene,
-            _renderer: renderer,
-            rotationSpeed: 0.005,
-            sphereColor: null,
-            wireframe: false
-        });
+        const clock = new THREE.Clock();
 
-        // Target
-        const aimTarget = utils.AddSphere(aimSphere, .1, null)
-        aimTarget.position.z = 10
-
-        // targetBox = utils.AddSphere(scene, .2, "grey")
-        // targetBox.name = "targetObject";
-        // targetBox.position.x = 3
-        // targetBox.position.y = 1
-        // targetBox.position.z = 2
+        instance.current = new Player(scene, renderer, camera, false)
+        instance.current.isRunningRef = isRunningRef
+        instance.current.isChrouchingRef = isChrouchingRef
 
         const params = {
             posX: camera.position.x,
@@ -165,20 +517,6 @@ export default function ThreeScene() {
             rootY: 0,
             rootZ: 0,
         }
-
-        let mixer;
-        const clock = new THREE.Clock();
-        var rifle: THREE.Object3D;
-        var rightHand: THREE.Object3D;
-        var spine: THREE.Object3D;
-        var hips: THREE.Object3D;
-        var spineController: utils.SpineAimController
-        var rifleOffset = new THREE.Vector3(26.76, 110.1, 13.96)
-        var aimSpineOffset = new THREE.Vector3(-4, -43.67, 0)
-        var riflePositionOffset = new THREE.Vector3(3.59, 7.86, 3.23)
-        var leftArmIK;
-        var idleActionLerp = new utils.LerpManager();
-        var idleChrouchActionLerp = new utils.LerpManager();
 
         // GUI setup
         let gui: GUI | null = null;
@@ -208,18 +546,81 @@ export default function ThreeScene() {
 
             var Test = gui.addFolder('Test')
 
-            Test.add(rifleOffset, 'x', -360, 360, 0.01).name('rifleOffset x').onChange(v => { rifleOffset.x = v }).listen()
-            Test.add(rifleOffset, 'y', -360, 360, 0.01).name('rifleOffset y').onChange(v => { rifleOffset.y = v }).listen()
-            Test.add(rifleOffset, 'z', -360, 360, 0.01).name('rifleOffset z').onChange(v => { rifleOffset.z = v }).listen()
+            // Test.add(rifleOffset, 'x', -360, 360, 0.01).name('rifleOffset x').onChange(v => { rifleOffset.x = v }).listen()
+            // Test.add(rifleOffset, 'y', -360, 360, 0.01).name('rifleOffset y').onChange(v => { rifleOffset.y = v }).listen()
+            // Test.add(rifleOffset, 'z', -360, 360, 0.01).name('rifleOffset z').onChange(v => { rifleOffset.z = v }).listen()
 
-            Test.add(aimSpineOffset, 'x', -360, 360, 0.01).name('aimSpineOffset x').onChange(v => { aimSpineOffset.x = v }).listen()
-            Test.add(aimSpineOffset, 'y', -360, 360, 0.01).name('aimSpineOffset y').onChange(v => { aimSpineOffset.y = v }).listen()
-            Test.add(aimSpineOffset, 'z', -360, 360, 0.01).name('aimSpineOffset z').onChange(v => { aimSpineOffset.z = v }).listen()
+            // Test.add(aimSpineOffset, 'x', -360, 360, 0.01).name('aimSpineOffset x').onChange(v => { aimSpineOffset.x = v }).listen()
+            // Test.add(aimSpineOffset, 'y', -360, 360, 0.01).name('aimSpineOffset y').onChange(v => { aimSpineOffset.y = v }).listen()
+            // Test.add(aimSpineOffset, 'z', -360, 360, 0.01).name('aimSpineOffset z').onChange(v => { aimSpineOffset.z = v }).listen()
 
-            Test.add(riflePositionOffset, 'x', -10, 10, 0.01).name('riflePositionOffset x').onChange(v => { riflePositionOffset.x = v }).listen()
-            Test.add(riflePositionOffset, 'y', -10, 10, 0.01).name('riflePositionOffset y').onChange(v => { riflePositionOffset.y = v }).listen()
-            Test.add(riflePositionOffset, 'z', -10, 10, 0.01).name('riflePositionOffset z').onChange(v => { riflePositionOffset.z = v }).listen()
+            // Test.add(riflePositionOffset, 'x', -10, 10, 0.01).name('riflePositionOffset x').onChange(v => { riflePositionOffset.x = v }).listen()
+            // Test.add(riflePositionOffset, 'y', -10, 10, 0.01).name('riflePositionOffset y').onChange(v => { riflePositionOffset.y = v }).listen()
+            // Test.add(riflePositionOffset, 'z', -10, 10, 0.01).name('riflePositionOffset z').onChange(v => { riflePositionOffset.z = v }).listen()
         }
+
+        instance.current!.initialize().then(() => {
+            new GLTFLoader().load(
+                `${BASE}/models/environment.glb`,
+                gltf => {
+                    scene.add(gltf.scene);
+                    targetBox = gltf.scene.getObjectByName("targetObject") as THREE.Object3D
+                    targetBox.position.x = 0
+                    targetBox.position.y = 2
+                    targetBox.position.z = 3
+
+                    targetBox.rotation.y = Math.PI
+
+                    // const control = new TransformControls(this.camera, this.renderer.domElement);
+                    // control.setMode('translate');          // ‘rotate’ / ‘scale’ de var
+                    // control.attach(targetBox);
+                    // const gizmo = control.getHelper();
+                    // this.scene.add(gizmo);
+
+                    // Model veya sahne yüklenirken hedef objeyi ekle:
+                    hittablesRef.current.push(targetBox); // targetBox zaten referansın var
+
+                    gltf.scene.getObjectByName("box") as THREE.Object3D
+                    console.log("register") 
+                    console.log(hittablesRef.current.length)
+
+                },
+                xhr => console.log(`Loading: ${(xhr.loaded / xhr.total * 100).toFixed(1)}%`),
+                err => console.error('Error loading model:', err));
+            console.log("init done")
+        })
+        const animate = () => {
+            const slowDownFactor = 1;
+            deltaTime = clock.getDelta() * slowDownFactor;
+
+            params.posX = camera.position.x;
+            params.posY = camera.position.y;
+            params.posZ = camera.position.z;
+            params.rotX = camera.rotation.x;
+            params.rotY = camera.rotation.y;
+            params.rotZ = camera.rotation.z;
+
+            if (instance.current?.player) {
+                //utils.LookAtCustom(player, aimTarget.position, { x: true, y: true, z: true })
+                // Yeni bir Vector3 oluştur, içine target'in dünya pozisyonunu yaz
+                const worldTarget = new THREE.Vector3();
+                instance.current?.aimTarget.getWorldPosition(worldTarget);
+                utils.lookAtYawOnly(instance.current?.player, worldTarget)
+                // player.rotation.x = params.rootX;
+                // player.rotation.y = params.rootY;
+                // player.rotation.z = params.rootZ;
+            }
+
+            if (process.env.NODE_ENV === 'development' && gui) {
+                gui.updateDisplay();
+            }
+
+            instance.current?.onAnimate()
+            fovController.update()
+
+            renderer?.render(scene, camera);
+            requestAnimationFrame(animate);
+        };
 
         // 1) resize handler
         const onWindowResize = () => {
@@ -235,330 +636,6 @@ export default function ThreeScene() {
 
             // Renderer boyutunu güncelle
             renderer.setSize(width, height);
-        };
-
-        function getIdleWeight(x, y) {
-            // Maksimum uzaklık (X ve Y'nin en fazla 1 olabileceğini varsayarsak)
-            // Bu değer, (1,1) noktasının (0,0)'a olan uzaklığıdır: sqrt(1^2 + 1^2) = sqrt(2) ≈ 1.414
-            const maxDistance = 1.0; // Sliderlarımız 0-1 aralığında olduğu için, 1.0'ı maksimum kabul edebiliriz.
-            // Eğer (1,1) noktasının tam uzaklığını kullanmak istersek Math.sqrt(2) olmalı.
-            // Basitlik için ve slider aralığıyla uyumlu olması için 1.0 ideal.
-
-            // (0,0) noktasına olan uzaklığı hesapla
-            const distance = Math.sqrt(x * x + y * y);
-
-            // Uzaklığı normalize et (0 ile 1 arasına getir)
-            const normalizedDistance = THREE.MathUtils.clamp(distance / maxDistance, 0, 1);
-
-            // Idle ağırlığını hesapla: Uzaklık arttıkça ağırlık azalır
-            const idleWeight = 1.0 - normalizedDistance;
-
-            // Ağırlığın 0 ile 1 arasında olduğundan emin ol
-            return THREE.MathUtils.clamp(idleWeight, 0, 1);
-        }
-
-        new GLTFLoader().load(
-            // '/models/aimDummy.glb',
-            `${BASE}/models/aimDummy.glb`,
-            gltf => {
-                const model = SkeletonUtils.clone(gltf.scene);
-                scene.add(model);
-                // const n = new THREE.SkeletonHelper(model)
-                // scene.add(n);
-
-                // Animation mixer
-                mixer = new THREE.AnimationMixer(model);
-
-                // idleAction = mixer.clipAction(gltf.animations[2]);
-                idleAction = mixer.clipAction(gltf.animations.find(clip => clip.name === 'Idle'));
-                idleFireAction = mixer.clipAction(gltf.animations.find(clip => clip.name === 'IdleFire'));
-                idleChrouchAction = mixer.clipAction(gltf.animations.find(clip => clip.name === 'IdleCrouch'));
-
-                const idleFireUpperClip = utils.clipOnlyUpperBody(idleFireAction.getClip());   // ← yeni
-                const idleFireUpperAction = mixer.clipAction(idleFireUpperClip);     // ← yeni
-                idleFireUpperAction.setEffectiveWeight(0);                            // başlangıçta kapalı
-                idleFireUpperAction.play();
-                idleFireAction.clampWhenFinished = false;
-
-                // Eski idleFireAction değişkenine artık gerek yok,
-                // ama kodun geri kalanını bozmamak için şöyle güncelleyin:
-                idleFireAction = idleFireUpperAction;
-
-                walkBackAction = mixer.clipAction(gltf.animations.find(clip => clip.name === 'WalkBack'));//5
-                walkForwardAction = mixer.clipAction(gltf.animations.find(clip => clip.name === 'WalkForward'));//6
-                walkLeftAction = mixer.clipAction(gltf.animations.find(clip => clip.name === 'WalkLeft'));//7
-                walkRightAction = mixer.clipAction(gltf.animations.find(clip => clip.name === 'WalkRight'));//8
-
-                runBackAction = mixer.clipAction(gltf.animations.find(clip => clip.name === 'RunBack'));//0
-                runForwardAction = mixer.clipAction(gltf.animations.find(clip => clip.name === 'RunForward'));//1
-                runLeftAction = mixer.clipAction(gltf.animations.find(clip => clip.name === 'RunLeft'));//3
-                runRightAction = mixer.clipAction(gltf.animations.find(clip => clip.name === 'RunRight'));//4
-
-                chrouchBackAction = mixer.clipAction(gltf.animations.find(clip => clip.name === 'BackCrouch'));//0
-                chrouchForwardAction = mixer.clipAction(gltf.animations.find(clip => clip.name === 'ForwardCrouch'));//1
-                chrouchLeftAction = mixer.clipAction(gltf.animations.find(clip => clip.name === 'LeftCrouch'));//3
-                chrouchRightAction = mixer.clipAction(gltf.animations.find(clip => clip.name === 'RightCrouch'));//4
-
-                idleAction.setEffectiveWeight(0)
-                idleFireAction.setEffectiveWeight(0)
-                idleChrouchAction.setEffectiveWeight(0)
-
-                walkBackAction.setEffectiveWeight(0)
-                walkForwardAction.setEffectiveWeight(0)
-                walkLeftAction.setEffectiveWeight(0)
-                walkRightAction.setEffectiveWeight(0)
-
-                runBackAction.setEffectiveWeight(0)
-                runForwardAction.setEffectiveWeight(0)
-                runLeftAction.setEffectiveWeight(0)
-                runRightAction.setEffectiveWeight(0)
-
-                chrouchBackAction.setEffectiveWeight(0)
-                chrouchForwardAction.setEffectiveWeight(0)
-                chrouchLeftAction.setEffectiveWeight(0)
-                chrouchRightAction.setEffectiveWeight(0)
-
-                idleFireAction.setEffectiveTimeScale(2)
-                walkForwardAction.setEffectiveTimeScale(1.5)
-                walkBackAction.setEffectiveTimeScale(1.5)
-                runForwardAction.setEffectiveTimeScale(1.3)
-                runRightAction.setEffectiveTimeScale(.8)
-
-                idleAction.play()
-                idleFireAction.play()
-                idleChrouchAction.play()
-                walkBackAction.play()
-                walkForwardAction.play()
-                walkLeftAction.play()
-                walkRightAction.play()
-
-                runBackAction.play();
-                runForwardAction.play();
-                runLeftAction.play();
-                runRightAction.play();
-
-                chrouchBackAction.play();
-                chrouchForwardAction.play();
-                chrouchLeftAction.play();
-                chrouchRightAction.play();
-
-                idleActionLerp.setActions((x: number) => idleAction.setEffectiveWeight(x), () => idleAction.getEffectiveWeight())
-                idleChrouchActionLerp.setActions((x: number) => idleChrouchAction.setEffectiveWeight(x), () => idleChrouchAction.getEffectiveWeight())
-
-                rifle = model.getObjectByName("Rifle") as THREE.Object3D;
-
-                muzzle = new utils.MuzzleFlashAnimator(rifle, [
-                    `${BASE}/textures/shoot1.png`,
-                    `${BASE}/textures/shoot2.png`,
-                    `${BASE}/textures/shoot3.png`,
-                    `${BASE}/textures/shoot4.png`,
-                    `${BASE}/textures/shoot5.png`,
-                ], 50, true, true);
-
-                rightHand = model.getObjectByName("mixamorigRightHand") as THREE.Object3D;
-                rightHand.attach(rifle);
-
-                spine = model.getObjectByName("mixamorigSpine") as THREE.Object3D;
-                hips = model.getObjectByName("mixamorigHips") as THREE.Object3D;
-                player = model.getObjectByName("Right") as THREE.Object3D;
-                aimSphere.attach(camera)
-
-                // hide floor
-                const floor = model.getObjectByName("Floor") as THREE.Object3D;
-                floor.visible = false
-
-
-                spineController = new utils.SpineAimController({
-                    spineBone: spine,
-                    rifle: rifle,
-                    rifleRotationTarget: rightHand,
-                    target: aimTarget,
-                    offset: aimSpineOffset,
-                    rifleOffset: rifleOffset,
-                })
-                leftArmIK = new utils.FabrikLeftArm(
-                    {
-                        shoulder: model.getObjectByName('mixamorigLeftArm') as THREE.Bone,
-                        elbow: model.getObjectByName('mixamorigLeftForeArm') as THREE.Bone,
-                        wrist: model.getObjectByName('mixamorigLeftHand') as THREE.Bone,
-                    },
-                    rifle.getObjectByName('ForeGripTarget')!,   // Rifle üstüne boş bir boşluk / empty ekleyin
-                    2,                                          // iterations
-                );
-
-                params.rootX = player.rotation.x;
-                params.rootY = player.rotation.y;
-                params.rootZ = player.rotation.z;
-
-                const control = new TransformControls(camera, renderer.domElement);
-                control.setMode('translate');          // ‘rotate’ / ‘scale’ de var
-                control.attach(rifle.getObjectByName('ForeGripTarget')!);
-                const gizmo = control.getHelper();
-                // scene.add( gizmo );
-
-                new GLTFLoader().load(
-                    `${BASE}/models/environment.glb`,
-                    gltf => {
-                        scene.add(gltf.scene);
-                        targetBox = gltf.scene.getObjectByName("targetObject") as THREE.Object3D
-                        targetBox.position.x = 0
-                        targetBox.position.y = 2
-                        targetBox.position.z = 3
-
-                        targetBox.rotation.y = Math.PI
-
-                        // Model veya sahne yüklenirken hedef objeyi ekle:
-                        hittables.push(targetBox); // targetBox zaten referansın var
-
-                        const box = gltf.scene.getObjectByName("box") as THREE.Object3D
-                    });
-
-            },
-            xhr => console.log(`Loading: ${(xhr.loaded / xhr.total * 100).toFixed(1)}%`),
-            err => console.error('Error loading model:', err)
-        );
-
-        // addPositionSlidersToGUI(scene, gui)
-        // Render loop
-        const animate = () => {
-            const slowDownFactor = 1;
-            deltaTime = clock.getDelta() * slowDownFactor;
-            if (mixer) mixer.update(deltaTime);
-            //controls.update();
-
-            params.posX = camera.position.x;
-            params.posY = camera.position.y;
-            params.posZ = camera.position.z;
-            params.rotX = camera.rotation.x;
-            params.rotY = camera.rotation.y;
-            params.rotZ = camera.rotation.z;
-
-            if (player) {
-                //utils.LookAtCustom(player, aimTarget.position, { x: true, y: true, z: true })
-                // Yeni bir Vector3 oluştur, içine target'in dünya pozisyonunu yaz
-                const worldTarget = new THREE.Vector3();
-                aimTarget.getWorldPosition(worldTarget);
-                utils.lookAtYawOnly(player, worldTarget)
-                // player.rotation.x = params.rootX;
-                // player.rotation.y = params.rootY;
-                // player.rotation.z = params.rootZ;
-            }
-
-            if (process.env.NODE_ENV === 'development' && gui) {
-                gui.updateDisplay();
-            }
-
-            // find gun
-            if (rifle) {
-                if (rightHand) {
-                    //rightHand.getWorldPosition(rifle.position.add(riflePositionOffset));
-                    //rifle.position = riflePositionOffset;
-                    rifle.position.x = riflePositionOffset.x;
-                    rifle.position.y = riflePositionOffset.y;
-                    rifle.position.z = riflePositionOffset.z;
-
-                    rifle.rotation.x = rifleOffset.x;
-                    rifle.rotation.y = rifleOffset.y;
-                    rifle.rotation.z = rifleOffset.z;
-
-                    player.getWorldPosition(aimSphere.position)
-                    // player.getWorldPosition(camera.position)
-                    //mount.clientWidth < 1000 ? -1 :
-                    // camera.position.add(new THREE.Vector3(-1, 1.5, -2.5));
-                    // camera.position.add(new THREE.Vector3(mount.clientWidth < 1000 ? -.5 : -1, 1.381, -1.9));
-
-
-                }
-            }
-
-            // idleAction?.setEffectiveWeight(getIdleWeight(settings.transitionX, settings.transitionY));
-            idleActionLerp?.push(getIdleWeight(settings.transitionX, settings.transitionY), 1);
-
-            if (isChrouchingRef.current) {
-                // yürüyüşü sıfırla
-                walkLeftAction?.setEffectiveWeight(0);
-                walkRightAction?.setEffectiveWeight(0);
-                walkBackAction?.setEffectiveWeight(0);
-                walkForwardAction?.setEffectiveWeight(0);
-                // idleAction?.setEffectiveWeight(0);
-                idleActionLerp?.push(0);
-
-                // koşu animasyonları
-                chrouchLeftAction?.setEffectiveWeight(-THREE.MathUtils.clamp(settings.transitionX, -1, 0));
-                chrouchRightAction?.setEffectiveWeight(THREE.MathUtils.clamp(settings.transitionX, 0, 1));
-                chrouchBackAction?.setEffectiveWeight(-THREE.MathUtils.clamp(settings.transitionY, -1, 0));
-                chrouchForwardAction?.setEffectiveWeight(THREE.MathUtils.clamp(settings.transitionY, 0, 1));
-                // idleChrouchAction?.setEffectiveWeight(getIdleWeight(settings.transitionX, settings.transitionY));
-                idleChrouchActionLerp?.push(getIdleWeight(settings.transitionX, settings.transitionY), 1);
-                aimSpineOffset.x = 10
-
-            } else {
-                aimSpineOffset.x = -4
-
-                chrouchLeftAction?.setEffectiveWeight(0);
-                chrouchRightAction?.setEffectiveWeight(0);
-                chrouchBackAction?.setEffectiveWeight(0);
-                chrouchForwardAction?.setEffectiveWeight(0);
-                // idleChrouchAction?.setEffectiveWeight(0);
-                idleChrouchActionLerp?.push(0);
-
-                // eski yürüyüş mantığınız
-                walkLeftAction?.setEffectiveWeight(-THREE.MathUtils.clamp(settings.transitionX, -1, 0));
-                walkRightAction?.setEffectiveWeight(THREE.MathUtils.clamp(settings.transitionX, 0, 1));
-                // idleAction?.setEffectiveWeight(getIdleWeight(settings.transitionX, settings.transitionY));
-                walkBackAction?.setEffectiveWeight(-THREE.MathUtils.clamp(settings.transitionY, -1, 0));
-                walkForwardAction?.setEffectiveWeight(THREE.MathUtils.clamp(settings.transitionY, 0, 1));
-
-                if (isRunningRef.current) {
-                    // yürüyüşü sıfırla
-                    walkLeftAction?.setEffectiveWeight(0);
-                    walkRightAction?.setEffectiveWeight(0);
-                    walkBackAction?.setEffectiveWeight(0);
-                    walkForwardAction?.setEffectiveWeight(0);
-                    // idleAction?.setEffectiveWeight(0);
-                    // koşu animasyonları
-                    runLeftAction?.setEffectiveWeight(-THREE.MathUtils.clamp(settings.transitionX, -1, 0));
-                    runRightAction?.setEffectiveWeight(THREE.MathUtils.clamp(settings.transitionX, 0, 1));
-                    runBackAction?.setEffectiveWeight(-THREE.MathUtils.clamp(settings.transitionY, -1, 0));
-                    runForwardAction?.setEffectiveWeight(THREE.MathUtils.clamp(settings.transitionY, 0, 1));
-                } else {
-
-                    runLeftAction?.setEffectiveWeight(0);
-                    runRightAction?.setEffectiveWeight(0);
-                    runBackAction?.setEffectiveWeight(0);
-                    runForwardAction?.setEffectiveWeight(0);
-
-                    // eski yürüyüş mantığınız
-                    walkLeftAction?.setEffectiveWeight(-THREE.MathUtils.clamp(settings.transitionX, -1, 0));
-                    walkRightAction?.setEffectiveWeight(THREE.MathUtils.clamp(settings.transitionX, 0, 1));
-                    // idleAction?.setEffectiveWeight(getIdleWeight(settings.transitionX, settings.transitionY));
-                    walkBackAction?.setEffectiveWeight(-THREE.MathUtils.clamp(settings.transitionY, -1, 0));
-                    walkForwardAction?.setEffectiveWeight(THREE.MathUtils.clamp(settings.transitionY, 0, 1));
-                }
-            }
-
-            if (isRunningRef.current) {
-
-            } else {
-                spineController?.update();
-            }
-
-            // ---- Fire weight lerp ----
-            if (idleFireAction) {
-                fireWeight = THREE.MathUtils.lerp(
-                    fireWeight,
-                    fireTarget,
-                    deltaTime * FIRE_LERP_K
-                );
-                idleFireAction.setEffectiveWeight(fireWeight);
-            }
-
-            leftArmIK?.update();
-            idleActionLerp?.update()
-            idleChrouchActionLerp?.update()
-
-            renderer.render(scene, camera);
-            requestAnimationFrame(animate);
         };
 
         // 2) listener’ı ekle
@@ -577,13 +654,17 @@ export default function ThreeScene() {
             if (process.env.NODE_ENV === 'development' && gui) {
                 gui.destroy();
             }
-            //controls.dispose();
-            idleActionLerp?.clear()
-            idleChrouchActionLerp?.clear()
+
+            instance.current?.onClear(() => {
+                utils.SceneManager.deepDispose(scene, hittablesRef.current[0])
+                console.log(hittablesRef.current.length)
+            })
+
             renderer.dispose();
             if (mount) mount.innerHTML = '';
             mountRef?.current?.removeChild(renderer.domElement)
         };
+        // }
     }, []);
 
     // disable loupe
@@ -595,15 +676,6 @@ export default function ThreeScene() {
         document.addEventListener("touchstart", handleTouchMove, {
             passive: false,
         })
-
-        // alert(JSON.stringify({
-        //   dpr: window.devicePixelRatio,
-        //   innerW: window.innerWidth,
-        //   innerH: window.innerHeight,
-        //   outerW: window.outerWidth,
-        //   outerH: window.outerHeight
-        // }));
-
 
         return () => {
             document.removeEventListener("touchstart", handleTouchMove)
@@ -619,11 +691,11 @@ export default function ThreeScene() {
         raycaster.current.setFromCamera(pointer.current, camera);
 
         // Sadece hedef listesine raycast yap, derin arama yok
-        const intersects = raycaster.current.intersectObjects(hittables, false);
+        const intersects = raycaster.current.intersectObjects(hittablesRef.current, false);
 
         if (intersects.length > 0) {
             const hit = intersects[0];
-            if (hit.object.name !== "targetObject") return;
+            // if (hit.object.name !== "targetObject") return;
 
             // yeni X,Z konumlarını hesapla
             const newX = utils.getRandomFloat(-2, 2);
@@ -634,7 +706,6 @@ export default function ThreeScene() {
         }
     }, []);
 
-
     return <div
         // style={{ position: 'fixed', width: '100vw', height: '100vh', overflow: 'hidden' }}
         style={{
@@ -642,12 +713,11 @@ export default function ThreeScene() {
             /* var(--vvw) ve var(--vvh) JS’den güncellenen gerçek ölçüler */
             width: 'var(--vvw)',
             height: 'var(--vvh)',
-            overflow: 'hidden'
+            overflow: 'hidden',
         }}
     >
         <div ref={mountRef} style={{ width: '100%', height: '100%' }} />
-        <div
-            style={{
+        <div style={{
                 position: 'fixed',
                 /* Görünen alanın tam ortası */
                 top: '50%',
@@ -661,7 +731,8 @@ export default function ThreeScene() {
                 borderRadius: '50%',
                 pointerEvents: 'none',
                 userSelect: 'none',
-                zIndex: 10
+                zIndex: 10,
+                transition: 'width 0.05s ease, height 0.05s ease'
             }}
         />
         <div style={{
@@ -692,9 +763,13 @@ export default function ThreeScene() {
             }}
             onPointerDown={() => {
                 setIsRunning(true)
+                console.log(cameraRef.current?.fov)
+                fovController.push(75,.05)
+
             }}
             onPointerUp={() => {
                 setIsRunning(false)
+                fovController.push(60,.05)
             }}
         >
             💨
@@ -778,6 +853,10 @@ export default function ThreeScene() {
             }}
             onPointerUp={() => {
                 window.location.reload()
+                // Auth.signInWithGoogle().then((user) => {
+                //     alert(user.uid)
+                // })
+                // Auth.signInWithGoogleRedirect()
             }}
         >
             ⚙

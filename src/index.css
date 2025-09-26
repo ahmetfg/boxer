@@ -8,14 +8,18 @@ body {
 }
 
 code {
-  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
-    monospace;
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;
 }
 
 :root {
   /* Fallback olarak % veya vh kullanılıyor, ama js güncelleyince burası override olur */
   --vvw: 100vw;
   --vvh: 100vh;
+  /* Oranı hesapla, sonra birimle çarp */
+  --aspect-ratio: calc(var(--vvh) / var(--vvw));
+  /* transform: translate(calc(var(--vvh)*0.0),calc(var(--vvh)*0.5)) rotate(90deg); */
+  /* transform: translate(calc(var(--vvh)*0.5), calc(var(--vvh)*0.5)) rotate(90deg); */
+  /* transform: translate(calc(var(--vvh)/var(--vvw)),calc(var(--vvh)/var(--vvw))); */
 }
 
 /* Örnek: joystick % yerine gerçek görüntü yüksekliğinin %20’si olsun */
@@ -41,12 +45,12 @@ code {
   position: fixed;
   inset: 0;
   z-index: 2147483647;
-  display: none;                 /* default: görünmez */
+  display: none;
+  /* default: görünmez */
   align-items: center;
   justify-content: center;
   text-align: center;
-  padding: max(24px, env(safe-area-inset-top)) max(24px, env(safe-area-inset-right))
-           max(24px, env(safe-area-inset-bottom)) max(24px, env(safe-area-inset-left));
+  padding: max(24px, env(safe-area-inset-top)) max(24px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(24px, env(safe-area-inset-left));
   background: #ffffff;
   color: #525252;
   font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
@@ -56,17 +60,33 @@ code {
   max-width: 26rem;
   border-radius: 18px;
   padding: 20px 24px;
-  background: #ededed;
+  background: #ffffff;
+
   -webkit-backdrop-filter: blur(10px);
   backdrop-filter: blur(10px);
 }
 
-.rotate-lock h2 { margin: 0 0 3px; font-size: 1.1rem; font-weight: 700; }
-.rotate-lock p  { margin: 0; opacity: .9; font-size: .95rem; }
+.rotate-lock h2 {
+  margin: 0 0 3px;
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.rotate-lock p {
+  margin: 0;
+  opacity: .9;
+  font-size: .95rem;
+}
 
 /* Portrait'ta overlay’i aç */
 @media (orientation: portrait) {
-  .rotate-lock { display: flex; }
+  .rotate-lock {
+    display: flex;
+  }
+
   /* İstersen sayfayı scroll/touch’tan da kilitle */
-  body { overflow: hidden; touch-action: none; }
+  body {
+    overflow: hidden;
+    touch-action: none;
+  }
 }
