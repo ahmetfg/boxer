@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 //import ThreeScene from './components/ThreeScene';
 //import ThreeScene from './components/ThreeAim.tsx';
-import ThreeScene from './components/ThreeMatch.tsx';
+import ThreeScene from './components/ThreeHyperCasual.tsx';
 // import "./components/TEST.js"
 // import { Auth } from './components/Auth.js';
 // import { Reader } from './components/Reader.tsx';

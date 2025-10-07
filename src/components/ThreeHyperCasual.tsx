@@ -3,22 +3,29 @@ import React, { useRef, useEffect, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import * as utils from './Utils.tsx';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader';
-import { TransformControls } from 'three/examples/jsm/controls/TransformControls';
+// import { TransformControls } from 'three/examples/jsm/controls/TransformControls';
 import { GUI, color } from 'dat.gui';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import Joystick from './Joystick.tsx'; // Joystick bileşenini import et
+import './Extensions.tsx'
 const BASE = process.env.PUBLIC_URL;  // → "/boxer"
 
 var deltaTime: number;
 var muzzle: utils.MuzzleFlashAnimator
+var turretMuzzle: utils.MuzzleFlashAnimator
 let fireWeight = 0;   // anlık ağırlık
 let fireTarget = 0;   // hedef ağırlık (0 veya 1)
 const FIRE_LERP_K = 20;   // hız katsayısı (büyüdükçe daha hızlı)
 // const isLandscape = window.matchMedia("(orientation: landscape)").matches;
 
 // Hedefleri tek bir yerde topla
-var targetBox;
-var fovController = new utils.LerpManager()
+var targetBox: THREE.Object3D;
+var turret: Turret;
+var fovController = new utils.LerpManager();
+var perkTurret15: PerkArea;
+var perkAmmo5: PerkArea;
+var rayVisualizer: THREE.ArrowHelper;
+
 // Kontrol için bir ayarlar nesnesi oluşturalım
 const settings = {
     transitionX: 0.0, // 0'dan 1'e kadar gidecek slider değeri
@@ -26,6 +33,100 @@ const settings = {
 };
 var someBool = false
 
+// --- Parametreler ---
+const gravity = 2.8;        // Yerçekimi ivmesi (m/s^2)
+const desiredFlightTime = 2.5; // Hedefe 2 saniyede ulaşsın.
+const missileDamageDistance = 2; // Hedefe 2 saniyede ulaşsın.
+var ammoAnimationMixer: THREE.AnimationMixer;
+
+// Kaynak (Atan oyuncu)
+const sourcePos = new THREE.Vector3(0, 1.5, 7);
+
+// --- Füze Oluşturma ---
+var missile: utils.Missile;
+
+class Turret {
+    head: THREE.Object3D;
+    neck: THREE.Object3D;
+    legs: THREE.Object3D;
+    headVerticalLerp: utils.LerpManager;
+    headHorizontalLerp: utils.LerpManager;
+    neckHorizontalLerp: utils.LerpManager;
+    visulize = () => { }
+
+    constructor(parent: THREE.Object3D, onShootTarget: () => void, check: () => boolean) {
+        this.head = parent.getObjectByName("Head") as THREE.Object3D
+        this.neck = parent.getObjectByName("Neck") as THREE.Object3D
+        this.legs = parent.getObjectByName("Legs") as THREE.Object3D
+        this.headVerticalLerp = new utils.LerpManager()
+        this.headHorizontalLerp = new utils.LerpManager()
+        this.neckHorizontalLerp = new utils.LerpManager()
+
+        this.headHorizontalLerp.setActions(
+            (x: number) => this.head.rotation.x = x,
+            () => this.neck.rotation.x
+        )
+
+        this.neckHorizontalLerp.setActions(
+            (y: number) => this.neck.rotation.y = y,
+            () => this.neck.rotation.y
+        )
+
+        turretMuzzle = new utils.MuzzleFlashAnimator(this.head, [
+            `${BASE}/textures/shoot1.png`,
+            `${BASE}/textures/shoot2.png`,
+            `${BASE}/textures/shoot3.png`,
+            `${BASE}/textures/shoot4.png`,
+            `${BASE}/textures/shoot5.png`,
+        ], 50, true, true, new THREE.Vector3(0.06, 0, 0.28));
+        var a = false
+        setInterval(() => {
+            a = !a
+            if (a && perkTurret15.isActive) {
+                turretMuzzle.play()
+                if (check()) {
+                    onShootTarget()
+                }
+            } else {
+                turretMuzzle.stop()
+            }
+        }, 300);
+    }
+
+    update() {
+        this.headVerticalLerp.update()
+        this.headHorizontalLerp.update()
+        this.neckHorizontalLerp.update()
+        // this.visulize()
+    }
+
+    setNewTarget(target: any) {
+        const neckOld = this.neck.quaternion.clone()
+        const headOld = this.head.quaternion.clone()
+        utils.lookAtYewOnly(this.neck, target.position, (rot: number, object: any) => {
+            object.rotation.y = rot
+        })
+        this.head.lookAt(target.position)
+
+        this.headHorizontalLerp.push(this.head.rotation.x, 0.01)
+        this.neckHorizontalLerp.push(this.neck.rotation.y, 0.01)
+
+        this.neck.setRotationFromQuaternion(neckOld)
+        this.head.setRotationFromQuaternion(headOld)
+    }
+
+    hide() {
+        this.head.visible = false
+        this.neck.visible = false
+        this.legs.visible = false
+    }
+
+    show() {
+        this.head.visible = true
+        this.neck.visible = true
+        this.legs.visible = true
+    }
+}
 class Player {
     player: THREE.Object3D;
     playerSurface: THREE.Object3D;
@@ -441,7 +542,95 @@ class Player {
 
     }
 }
-export default function ThreeScene({ didRotate }) {
+class PerkArea {
+    mesh: THREE.Object3D;
+    quad: [THREE.Vector3, THREE.Vector3, THREE.Vector3, THREE.Vector3];
+    checker: object;
+    player: THREE.Object3D;
+    didEnd = true;
+    onActivate = () => { };
+    onReactivate = () => { };
+    id?: number | undefined;
+    frameCountForPass: number | undefined = 2000
+    frameCountForReactivate: number | undefined = undefined
+    cost: number;
+    isActive: boolean = false;
+    visulizeArea: boolean = true;
+    visuliseDots: any;
+
+    constructor(scene: THREE.Scene, mesh: THREE.Object3D, quad: [THREE.Vector3, THREE.Vector3, THREE.Vector3, THREE.Vector3], player: THREE.Object3D, cost: number, frameCountForPass?: number | undefined, frameCountForReactivate?: number | undefined) {
+        // 2) her frame için hızlı versiyon:
+        this.checker = utils.XZChecker.createXZQuadChecker(quad, { convex: true }); // dışbükeyse true → daha hızlı
+        this.player = player
+        this.cost = cost
+        this.frameCountForPass = frameCountForPass
+        this.mesh = mesh
+        this.quad = quad
+        this.frameCountForReactivate = frameCountForReactivate
+
+        // make it more crisp
+        this.mesh!.material.map.anisotropy = 2
+
+        if (this.visulizeArea) {
+            this.visuliseDots = [
+                utils.AddDebugSphere(scene, .1, 0xff0000ff),
+                utils.AddDebugSphere(scene, .1, 0xff0000ff),
+                utils.AddDebugSphere(scene, .1, 0xff0000ff),
+                utils.AddDebugSphere(scene, .1, 0xff0000ff)
+            ]
+            this.visuliseDots[0].position.set(this.quad[0].x, this.quad[0].y, this.quad[0].z)
+            this.visuliseDots[1].position.set(this.quad[1].x, this.quad[1].y, this.quad[1].z)
+            this.visuliseDots[2].position.set(this.quad[2].x, this.quad[2].y, this.quad[2].z)
+            this.visuliseDots[3].position.set(this.quad[3].x, this.quad[3].y, this.quad[3].z)
+        }
+    }
+
+    update(balance: number) {
+        if (this.isActive == false && this.checker && balance >= this.cost) {
+            if (this.checker.containsObj(this.player)) {
+                if (this.didEnd == true) {
+                    // console.log("start")
+                    this.didEnd = false;
+                    this.clearPassTimeout()
+
+                    this.id = setTimeout(() => {
+                        if (this.didEnd == false) {
+                            this.isActive = true
+                            this.onActivate()
+
+                            if (this.frameCountForReactivate != undefined) {
+                                setTimeout(() => {
+                                    this.isActive = false
+                                    this.onReactivate()
+                                    this.clearPassTimeout()
+                                }, this.frameCountForReactivate);
+                            } else {
+                                this.clearPassTimeout()
+                            }
+                        }
+                    }, this.frameCountForPass);
+                }
+                // içerde
+                return true
+            } else {
+                this.clearPassTimeout()
+                // dışarda
+                return false
+            }
+        } else {
+        }
+    }
+
+    clearPassTimeout() {
+        if (this.id != undefined) {
+            // console.log("end")
+            clearTimeout(this.id)
+            this.didEnd = true;
+            this.id = undefined
+        }
+    }
+}
+export default function ThreeScene({ }) {
     const getInitialOrientation = () => {
         const isLandscape = window.matchMedia("(orientation: landscape)").matches;
         return !isLandscape;
@@ -454,9 +643,11 @@ export default function ThreeScene({ didRotate }) {
     const [isFiring, setIsFiring] = useState(false);
     const [isChrouching, setIsChrouching] = useState(false);
     const [crossSize, setCrossize] = useState(.01);
-    const [goldCount, setGoldCount] = useState(0);
+    const [balance, setBalance] = useState(0);
+    const balanceRef = useRef(balance);
     const [healthPercent, setHealthPercent] = useState(100);
     const [opponentHealthPercent, setOpponentHealthPercent] = useState(100);
+    const [ammoPercent, setAmmoPercent] = useState(100);
     const isRunningRef = useRef(isRunning);
     const isChrouchingRef = useRef(isChrouching);
     // References to core Three.js objects
@@ -468,7 +659,6 @@ export default function ThreeScene({ didRotate }) {
     const hittablesRef = useRef<THREE.Object3D[]>([]);
     const onRotate = useRef((_: boolean) => { })
 
-
     function FixRotation(silent: boolean | undefined = false) {
         setForceToRotate(getInitialOrientation());
         updateViewportVars(silent)
@@ -477,10 +667,11 @@ export default function ThreeScene({ didRotate }) {
     }
 
     useEffect(() => {
-            setTimeout(() => {
-                FixRotation();
-            }, 1000);
+        setTimeout(() => {
+            FixRotation();
+        }, 1000);
     }, [windowSize]);
+    useEffect(() => { balanceRef.current = balance; }, [balance]);
     useEffect(() => { isRunningRef.current = isRunning; }, [isRunning]);
     useEffect(() => { isChrouchingRef.current = isChrouching; }, [isChrouching]);
     // useEffect ile component yüklendiğinde (mount) ve kaldırıldığında (unmount) çalışacak kodu belirliyoruz.
@@ -531,7 +722,6 @@ export default function ThreeScene({ didRotate }) {
         };
     }, []);
 
-
     function updateViewportVars(silent = false) {
         if (!silent) {
             setWindowSize(prev => {
@@ -560,11 +750,6 @@ export default function ThreeScene({ didRotate }) {
 
         instance.current?.moveCharacter(joystickCoords, isRunning ? 4 : 1.3, deltaTime, forceRotate)
     }, [joystickCoords])
-
-    // useEffect(() => {
-    //     onWindowResize()
-    //     console.log("on|forceRotate")
-    // }, [forceRotate])
 
     useEffect(() => {
         // if (sceneRef.current == null) {
@@ -605,28 +790,17 @@ export default function ThreeScene({ didRotate }) {
         renderer.setSize(mount.clientWidth, mount.clientHeight);
         mount.appendChild(renderer.domElement);
 
-        // Controls
-        // const controls = new OrbitControls(camera, renderer.domElement);
-        // controls.enableDamping = true;
-        // controls.dampingFactor = 0.05;
-
         // Lighting
         scene.add(new THREE.AmbientLight(0xffffff, 1));
         const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
-        dirLight.position.set(5, 10, 7.5);
+        dirLight.position.y = 3.14;
         scene.add(dirLight);
 
         const clock = new THREE.Clock();
 
-        // opponent.current = new Player(scene, renderer, camera, true)
-        // opponent.current.isRunningRef = isRunningRef
-        // opponent.current.isChrouchingRef = isChrouchingRef
-
         instance.current = new Player(scene, renderer, camera, false, forceRotate, onRotate)
         instance.current.isRunningRef = isRunningRef
         instance.current.isChrouchingRef = isChrouchingRef
-        
-        PlayersToBases()
 
         // TODO: why initial state only fetching via callback??
         onRotate.current(getInitialOrientation())
@@ -687,7 +861,7 @@ export default function ThreeScene({ didRotate }) {
 
         instance.current!.initialize().then(() => {
             PlayersToBases()
-
+            // AddTexture(scene)
             new GLTFLoader().load(
                 `${BASE}/models/environment.glb`,
                 gltf => {
@@ -699,11 +873,10 @@ export default function ThreeScene({ didRotate }) {
 
                     targetBox.rotation.y = Math.PI
 
-                    // const control = new TransformControls(this.camera, this.renderer.domElement);
-                    // control.setMode('translate');          // ‘rotate’ / ‘scale’ de var
-                    // control.attach(targetBox);
-                    // const gizmo = control.getHelper();
-                    // this.scene.add(gizmo);
+                    const area15 = gltf.scene.getObjectByName("15CoinFloor") as THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial, THREE.Object3DEventMap>
+                    // make more crisp
+                    // area15.material.map!.anisotropy = 2
+                    // area15.material.map!.generateMipmaps = false
 
                     // Model veya sahne yüklenirken hedef objeyi ekle:
                     hittablesRef.current.push(targetBox); // targetBox zaten referansın var
@@ -712,16 +885,138 @@ export default function ThreeScene({ didRotate }) {
                     ////console.log("register") 
                     ////console.log(hittablesRef.current.length)
 
-                },
-                xhr => ////console.log(`Loading: ${(xhr.loaded / xhr.total * 100).toFixed(1)}%`),
-                    err => console.error('Error loading model:', err));
-            ////console.log("init done")
+                    const area5 = gltf.scene.getObjectByName("5CoinFloor") as THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial, THREE.Object3DEventMap>
+                    const ammo = gltf.scene.getObjectByName("Ammo") as THREE.Object3D
+                    ammoAnimationMixer = new THREE.AnimationMixer(ammo);
+                    const action = ammoAnimationMixer.clipAction(gltf.animations.find((clip: any) => clip.name === 'Ammo_Idle'));
+                    action.play();
 
-            opponent.current!.initialize().then(() => {
-                PlayersToBases()
-                hittablesRef.current.push(opponent.current.playerSurface); // targetBox zaten referansın var
-            }).catch(() => { })
+                    perkAmmo5 = new PerkArea(scene, area5,
+                        [
+                            new THREE.Vector3(3, 0, -.1),
+                            new THREE.Vector3(1.5, 0, -.1),
+                            new THREE.Vector3(1.5, 0, -1.4),
+                            new THREE.Vector3(3, 0, -1.4),
+                        ],
+                        instance.current!.player,
+                        1,
+                        100,
+                        2000
+                    );
+
+                    perkAmmo5.onActivate = () => {
+                        ammo.visible = false
+                        setAmmoPercent(100)
+                        setBalance(prev => {
+                            return prev - perkAmmo5.cost
+                        })
+                    }
+
+                    perkAmmo5.onReactivate = () => {
+                        ammo.visible = true
+                    }
+
+                    turret = new Turret(gltf.scene.getObjectByName("Turret") as THREE.Object3D, onShootTarget, () => checkForwardRayIntersection(turret.head, [targetBox], 50))
+                    turret.hide()
+
+                    turret.visulize = () => {
+                        // 1. Önceki görselleştirmeyi sahneden kaldır
+                        if (rayVisualizer) {
+                            scene.remove(rayVisualizer);
+                            rayVisualizer.dispose(); // Bellek temizliği
+                        }
+
+                        // Vektörlerin hesaplanması
+                        const origin = turret.head.worldPosition();
+
+                        const direction = new THREE.Vector3(0, 0, 1); // Varsayılan: Lokal -Z (Objenin önü)
+                        direction.applyQuaternion(turret.head.worldQuaternion()).normalize(); // Yönü objenin rotasyonuna göre ayarla
+
+                        // 2. Işının rengini belirle (Kesişim varsa kırmızı, yoksa yeşil)
+                        const rayColor = 0xff0000;
+
+                        // 3. Okun uzunluğunu belirle
+                        // Kesişim varsa o mesafeye kadar, yoksa maxDistance kadar uzat.
+                        const arrowLength = 50;
+
+                        // 4. ArrowHelper'ı oluştur
+                        rayVisualizer = new THREE.ArrowHelper(
+                            direction, // Yön vektörü
+                            origin,    // Başlangıç noktası
+                            arrowLength,
+                            rayColor,
+                            0.5, // Ok başı (head) uzunluğu
+                            0.2  // Ok başı (head) kalınlığı
+                        );
+
+                        // 5. ArrowHelper'ı sahneye ekle
+                        scene.add(rayVisualizer);
+                    }
+
+                    // 2) her frame için hızlı versiyon:
+                    // perkTurret15 = utils.XZChecker.createXZQuadChecker(quad, { convex: true }); // dışbükeyse true → daha hızlı
+                    perkTurret15 = new PerkArea(scene, area15,
+                        [
+                            new THREE.Vector3(-1, 0, -.15),
+                            new THREE.Vector3(-2.52, 0, -.15),
+                            new THREE.Vector3(-2.52, 0, -1.4),
+                            new THREE.Vector3(-1, 0, -1.4),
+                        ],
+                        instance.current!.player,
+                        15,
+                        1000
+                    ); // dışbükeyse true → daha hızlı
+
+                    perkTurret15.onActivate = () => {
+                        turret.show()
+                        turret.setNewTarget(targetBox)
+                        setBalance(prev => {
+                            return prev - perkTurret15.cost
+                        })
+                    }
+
+                    missile = new utils.Missile(
+                        sourcePos,
+                        instance?.current?.player?.worldPosition(),
+                        desiredFlightTime,
+                        gravity,
+                        scene
+                    );
+
+                    // --- Yörünge Çizgisini Ekleme (İsteğe Bağlı) ---
+                    missile.createTrajectoryLine(
+                        sourcePos,
+                        instance?.current?.player?.worldPosition(),
+                        desiredFlightTime,
+                        gravity
+                    );
+                    scene.add(missile.trajectoryLine);
+                    missile.setInterval(
+                        sourcePos,
+                        () => instance.current?.player.worldPosition(),
+                        desiredFlightTime,
+                        gravity,
+                        (lastPoint) => {
+                            const dist = lastPoint.distanceTo(instance.current?.player.worldPosition())
+                            if (dist <= missileDamageDistance) {
+                                // health bar debug
+                                setHealthPercent(prev => {
+                                    if (prev - missile.damage <= 0) {
+                                        window.location.reload()
+                                        return 0
+                                    }
+                                    return prev - missile.damage
+                                })
+                            }
+                            console.log(dist)
+                        }
+                    )
+                },
+                () => ////console.log(`Loading: ${(xhr.loaded / xhr.total * 100).toFixed(1)}%`),
+                    (err: any) => console.error('Error loading model:', err));
+            ////console.log("init done")
         }).catch(() => { })
+
         const animate = () => {
             const slowDownFactor = 1;
             deltaTime = clock.getDelta() * slowDownFactor;
@@ -742,6 +1037,9 @@ export default function ThreeScene({ didRotate }) {
                 // player.rotation.x = params.rootX;
                 // player.rotation.y = params.rootY;
                 // player.rotation.z = params.rootZ;
+
+                perkTurret15?.update(balanceRef.current)
+                perkAmmo5?.update(balanceRef.current)
             }
 
             if (process.env.NODE_ENV === 'development' && gui) {
@@ -751,6 +1049,11 @@ export default function ThreeScene({ didRotate }) {
             instance.current?.onAnimate()
             opponent.current?.onAnimate()
             fovController.update()
+            turret?.update()
+
+            // Füzenin konumunu güncelle
+            missile?.update(deltaTime);
+            ammoAnimationMixer?.update(deltaTime)
 
             renderer?.render(scene, camera);
             requestAnimationFrame(animate);
@@ -758,8 +1061,6 @@ export default function ThreeScene({ didRotate }) {
 
         // 2) listener’ı ekle
         window.addEventListener('resize', FixRotation);
-        // window.visualViewport?.addEventListener('resize', onWindowResize);
-        // window.visualViewport?.addEventListener('scroll', onWindowResize);
 
         // 3) ilk boyutlandırmayı da yap
         onWindowResize();
@@ -782,8 +1083,6 @@ export default function ThreeScene({ didRotate }) {
                 ////console.log(hittablesRef.current.length)
             }, null)
 
-            // idleActionLerp?.clear()
-            // idleChrouchActionLerp?.clear()
             renderer.dispose();
             if (mount) mount.innerHTML = '';
             mountRef?.current?.removeChild(renderer.domElement)
@@ -817,11 +1116,7 @@ export default function ThreeScene({ didRotate }) {
     };
 
     function PlayersToBases() {
-        instance?.current?.player?.position.set(-3, 0, -3)
-        //opponent?.current?.player.position.set(6,0,5) 
-        if (opponent.current) {
-            opponent.current.player.rotation.z = Math.PI
-        }
+        instance?.current?.player?.position.set(0, 0, -3)
     }
 
     // disable loupe
@@ -839,8 +1134,94 @@ export default function ThreeScene({ didRotate }) {
         }
     }, [])
 
+    function AddTexture(scene: THREE.Scene) {
+        const loader = new THREE.TextureLoader();
+        const texture = loader.load(`${BASE}/textures/15_coin_floor_no_shadow2.jpeg`,);
+        // texture.generateMipmaps = false
+        texture.anisotropy = 2
+        const geometry = new THREE.PlaneGeometry(2, 2); // ensure correct aspect ratio
+        const material = new THREE.MeshBasicMaterial({ map: texture, side: THREE.BackSide });
+
+        const mesh = new THREE.Mesh(geometry, material);
+
+        scene.add(mesh);
+        mesh.rotation.x = Math.PI / 2
+        mesh.rotation.z = 3.14
+        // mesh.position.x = 0
+        // mesh.position.y = 0
+        mesh.position.z = -1.48
+    }
+
+    /**
+     * Bir objenin pozisyonundan ve yönünden çıkan bir ışının, hedef objelerle kesişip kesişmediğini kontrol eder.
+     *
+     * @param {THREE.Object3D} sourceObject Ray'i fırlatan obje (örneğin bir oyuncu, kamera, vb.).
+     * @param {Array<THREE.Object3D>} targets Kesişim kontrolü yapılacak tekil veya çoklu hedef objeler.
+     * @param {number} [maxDistance=Infinity] Ray'in maksimum gideceği mesafe.
+     * @returns {THREE.Intersection | null} İlk kesişen objenin bilgilerini (Intersection) döndürür, kesişim yoksa null döner.
+     */
+    function checkForwardRayIntersection(sourceObject: THREE.Object3D, targets: [THREE.Object3D], maxDistance = Infinity) {
+        const raycaster = new THREE.Raycaster();
+
+        // Vektörlerin hesaplanması
+        const origin = sourceObject.worldPosition();
+
+        const direction = new THREE.Vector3(0, 0, 1); // Varsayılan: Lokal -Z (Objenin önü)
+        direction.applyQuaternion(sourceObject.worldQuaternion()).normalize(); // Yönü objenin rotasyonuna göre ayarla
+
+        // Raycaster'ı Kur
+        raycaster.set(origin, direction);
+        raycaster.far = maxDistance;
+
+        // Kesişimi Kontrol Et
+        const intersects = raycaster.intersectObjects(targets, true);
+
+        // Eğer kesişim varsa ve ilk kesişen obje *kaynak objenin kendisi değilse*
+        if (intersects.length > 0) {
+            // En yakın kesişim bilgisini döndür
+            // return intersects[0];
+            return intersects[0].object == targets[0];
+        }
+
+        // Kesişim yoksa null döndür
+        // return null;
+        return false;
+    }
+
+    function onShootTarget() {
+        // const hit = intersects[0];
+        // if (hit.object.name !== "targetObject") return;
+
+        // yeni X,Z konumlarını hesapla
+        const newX = utils.getRandomFloat(-2, 2);
+        const newY = utils.getRandomFloat(0.5, 3);
+
+        // taşı
+        targetBox.position.set(newX, newY, targetBox.position.z);
+        setBalance(prev => {
+            return prev + 1
+        })
+
+        // health bar debug
+        setOpponentHealthPercent(prev => {
+            if (prev - 10 <= 0) {
+                return 100
+            }
+            return prev - 10
+        })
+
+        // turret to target lerp
+        turret.setNewTarget(targetBox)
+    }
+    function onShoot() {
+        setAmmoPercent(prev => {
+            return prev - 10
+        })
+    }
     // Shoot function using raycast (optimize)
     const shoot = useCallback(() => {
+        onShoot()
+
         const camera = cameraRef.current!;
 
         // Ekran merkezinden ray at (0,0 normalized device coords)
@@ -851,30 +1232,11 @@ export default function ThreeScene({ didRotate }) {
         const intersects = raycaster.current.intersectObjects(hittablesRef.current, false);
 
         if (intersects.length > 0) {
-            const hit = intersects[0];
-            // if (hit.object.name !== "targetObject") return;
-
-            // yeni X,Z konumlarını hesapla
-            const newX = utils.getRandomFloat(-2, 2);
-            const newY = utils.getRandomFloat(0.5, 3);
-
-            // taşı
-            targetBox.position.set(newX, newY, targetBox.position.z);
-            setGoldCount(prev => {
-                return prev + 1
-            })
-            // health bar debug
-            setOpponentHealthPercent(prev => {
-                if (prev - 10 <= 0) {
-
-                    return 100
-                }
-                return prev - 10
-            })
+            onShootTarget()
         }
     }, []);
 
-    function HealthBar({ targetHealthPercent, side }) {
+    function HealthBar({ targetHealthPercent, side, color, title, titleColor }) {
         return <button
             style={{
                 position: 'fixed',
@@ -887,7 +1249,6 @@ export default function ThreeScene({ didRotate }) {
                 top: `calc(var(--vvh) * 0.05 + env(safe-area-inset-top))`,
                 width: `calc(var(--vvh) * 0.38)`,
                 height: `calc(var(--vvh) * 0.08)`,
-                //fontSize: 'calc(var(--vvh) * 0.04)',
                 borderRadius: 'calc(var(--vvh) * 0.02 + 2px)',
                 backgroundColor: "color-mix(in srgb, black 50%, transparent)",
                 color: 'white',
@@ -901,27 +1262,71 @@ export default function ThreeScene({ didRotate }) {
         >
             <div
                 style={{
-                    backgroundColor: 'limegreen',
+                    backgroundColor: color == undefined ? 'limegreen' : color,
                     display: "flex",
-                    width: `${targetHealthPercent}%`,
+                    width: targetHealthPercent == 0 ? "0px" : `${targetHealthPercent}%`,
                     fontFamily: "monospace",
                     fontSize: 'calc(var(--vvh) * 0.05)',
-                    color: "white",
+                    color: titleColor,
                     height: "100%",
                     alignItems: "center",
                     justifyContent: 'left',
                     textAlign: "left",
                     borderRadius: 'calc(var(--vvh) * 0.02)',
                     boxSizing: 'border-box',
-                    paddingLeft: "7%",
+                    paddingLeft: targetHealthPercent > 0 ? "7%" : undefined,
                 }}
             >
-                +
+                {targetHealthPercent > 0 && title}
             </div>
         </button>
     }
 
-    function Dashboard({}) {
+    function AmmoBar({ targetPercent, side, color }) {
+        return <button
+            style={{
+                position: 'fixed',
+                left: side == "left"
+                    ? `calc(var(--vvw) * 0.05 + var(--vvh) * 0.08 + 10px + env(safe-area-inset-left)  * .1) `
+                    : undefined,
+                right: side == "right"
+                    ? `calc(var(--vvw) * 0.05 + var(--vvh) * 0.08 + 10px + env(safe-area-inset-left)  * .1) `
+                    : undefined,
+                top: `calc(var(--vvh) * 0.135 + env(safe-area-inset-top))`,
+                width: `calc(var(--vvh) * 0.38)`,
+                height: `calc(var(--vvh) * 0.03)`,
+                borderRadius: 'calc(var(--vvh) * 0.02 + 2px)',
+                backgroundColor: "color-mix(in srgb, black 50%, transparent)",
+                color: 'white',
+                border: 'none',
+                userSelect: 'none',
+                touchAction: 'none',
+                padding: 2,
+                transform: `translateZ(0px)`,
+
+            }}
+        >
+            <div
+                style={{
+                    backgroundColor: color == undefined ? "royalblue" : color,
+                    display: "flex",
+                    width: targetPercent > 0 ? `${targetPercent}%` : "0px",
+                    fontFamily: "monospace",
+                    fontSize: 'calc(var(--vvh) * 0.05)',
+                    height: "100%",
+                    alignItems: "center",
+                    justifyContent: 'left',
+                    textAlign: "left",
+                    borderRadius: 'calc(var(--vvh) * 0.02)',
+                    boxSizing: 'border-box',
+                    paddingLeft: targetPercent > 0 ? "7%" : undefined,
+                }}
+            >
+            </div>
+        </button>
+    }
+
+    function Dashboard({ }) {
         return <div
             style={{
                 position: 'fixed',
@@ -943,12 +1348,12 @@ export default function ThreeScene({ didRotate }) {
                 padding: 2,
                 // fontFamily: 'Satoshi',
                 fontFamily: 'Impact',
-                gap:5,
-                paddingLeft:15,
-                paddingRight:15,
+                gap: 5,
+                paddingLeft: 15,
+                paddingRight: 15,
             }}
         >
-            <i class="fa-solid fa-coins" style={{color: "limegreen",}}></i> {goldCount}
+            <i className="fa-solid fa-coins" style={{ color: "limegreen", }}></i> {balance}
         </div>
     }
     // 3,44
@@ -1048,11 +1453,13 @@ export default function ThreeScene({ didRotate }) {
 
             }}
             onPointerDown={() => {
-                setCrossize(.03)
-                shoot()
-                fireTarget = 1;        // hedef  → 1
                 setIsFiring(true);
-                muzzle?.play();
+                if (ammoPercent > 0) {
+                    setCrossize(.03)
+                    shoot()
+                    fireTarget = 1;        // hedef  → 1
+                    muzzle?.play();
+                }
             }}
 
             onPointerUp={() => {
@@ -1153,8 +1560,9 @@ export default function ThreeScene({ didRotate }) {
         >
             ⚙
         </button>
-        <HealthBar targetHealthPercent={healthPercent} side="left" />
-        <HealthBar targetHealthPercent={opponentHealthPercent} side="right" />
+        <HealthBar targetHealthPercent={healthPercent} side="left" title="+" titleColor="white" />
+        {/* <HealthBar targetHealthPercent={opponentHealthPercent} side="right" color="#ffffffff" title="o" titleColor="darkrey"/> */}
+        <AmmoBar targetPercent={ammoPercent} side="left" color={undefined} />
         <div ref={mountRef} style={{ width: '100%', height: '100%' }} />
         <Dashboard></Dashboard>
     </div>

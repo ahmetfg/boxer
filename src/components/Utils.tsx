@@ -54,12 +54,12 @@ export function initThreeJsSceneAndSphere(options = {}) {
 }
 
 
-function addEventListeners({_forceRotate, onRotate}) {
+function addEventListeners({ _forceRotate, onRotate }) {
   const dom = renderer.domElement;
   var forceRotate = _forceRotate ?? false
-    onRotate.current = ((f) => {
-      forceRotate = f
-      // alert(forceRotate)
+  onRotate.current = ((f) => {
+    forceRotate = f
+    // alert(forceRotate)
   })
   // 1) Canvas'ta tarayıcı scroll/zoom/çeviri hareketlerini kapat
   dom.style.touchAction = 'none';
@@ -114,15 +114,15 @@ function addEventListeners({_forceRotate, onRotate}) {
     if (forceRotate) {
       sphere.rotation.y -= deltaY * rotationSpeed;
       sphere.rotation.x -= deltaX * rotationSpeed;
-    }else{
+    } else {
       sphere.rotation.y -= deltaX * rotationSpeed;
       sphere.rotation.x += deltaY * rotationSpeed;
     }
 
     prevPos = { x: e.clientX, y: e.clientY };
   }, false);
-  return ()=>{}
-  
+  return () => { }
+
 }
 // function addEventListeners({ forceRotate }) {
 //   const dom = renderer.domElement;
@@ -354,7 +354,7 @@ function addPositionSlidersToGUI(scene, gui) {
 
 export default addPositionSlidersToGUI;
 
-export function AddSphere(scene, radius = 1, color = 0xffff005, widthSegments = 32, heightSegments = 16) {
+export function AddSphere(scene, radius = 1, color = 0xffff005, widthSegments = 32, heightSegments = 16): THREE.Object3D {
   const geometry = new THREE.SphereGeometry(radius, widthSegments, heightSegments);
   const material = new THREE.MeshBasicMaterial({
     color: color,
@@ -367,35 +367,95 @@ export function AddSphere(scene, radius = 1, color = 0xffff005, widthSegments = 
   return sphere
 }
 
+export function AddDebugSphere(scene:THREE.Scene, radius = 1, color = 0xffff005, widthSegments = 32, heightSegments = 16, name = "sphere"): THREE.Object3D {
+  const geometry = new THREE.SphereGeometry(radius, widthSegments, heightSegments);
+  const material = new THREE.MeshBasicMaterial({
+    color: color,
+    transparent: false,
+    opacity: 1,
+  });
+  const sphere = new THREE.Mesh(geometry, material);
+  sphere.name = name
+  scene.add(sphere);
+  return sphere
+}
+
+
 /**
- * Constrained lookAt: Hangi eksenlerin aktif olacağını seçerek obje yönlendirmesi yapar.
+ * object:    THREE.Object3D   → döndürülecek nesne (LOCAL rotasyonu ayarlanır)
+ * targetPos: THREE.Vector3    → DÜNYA (world) koordinatlarında hedef nokta
+ * axes:      {x?:boolean,y?:boolean,z?:boolean} → hangi Euler eksenlerinin hedefe
+ *             bakışa göre güncelleneceğini seçersin. false olanlar korunur.
  * 
- * @param {THREE.Object3D} object    — Yönlendirmek istediğiniz obje
- * @param {THREE.Vector3}  targetPos — Bakılacak dünya konumu
- * @param {Object}         axes      — Hangi eksenlerin aktif olacağını belirten obje
- *                                   { x: Boolean, y: Boolean, z: Boolean }
+ * Not: Three.js'in lookAt'i nesnenin -Z eksenini hedefe çevirir. Modelinin "ileri" ekseni
+ *      farklıysa (örn. +Y) modele/pivota bir düzeltme rotasyonu ekleyebilirsin.
  */
-export function LookAtCustom(object, targetPos, axes = { x: true, y: true, z: true }) {
-  // 1) Mevcut Euler rotasyonu sakla
-  const origEuler = object.rotation.clone();
+export function LookAtCustom(
+  object: THREE.Object3D,
+  targetPos: THREE.Vector3,
+  axes: { x?: boolean; y?: boolean; z?: boolean } = { x: true, y: true, z: true },
+  factor: { x?: number; y?: number; z?: number } = { x: 1, y: 1, z: 1 }
+) {
+  // 1) world → desired world quaternion
+  const objWorldPos = new THREE.Vector3();
+  object.getWorldPosition(objWorldPos);
 
-  // 2) Geçici bir nesne yarat, objenin pozuna yerleştir
-  const tmp = new THREE.Object3D();
-  tmp.position.copy(object.getWorldPosition(new THREE.Vector3()));
+  // Aynı noktadaysa çık
+  if (objWorldPos.distanceToSquared(targetPos) < 1e-12) return;
 
-  // 3) Geçici nesneyle standart lookAt yap
-  tmp.lookAt(targetPos);
+  const up = new THREE.Vector3(0, 1, 0);
+  const lookMtx = new THREE.Matrix4().lookAt(objWorldPos, targetPos, up);
 
-  // 4) Ortaya çıkan rotasyondan Euler açılarını al
-  const newEuler = tmp.rotation;
+  // Matrix4.lookAt "kamera bakışı" üretir; nesneyi hedefe çevirmek için çevir.
+  // three.js’te bir nesnenin hedefe bakması için, view matrix'in tersine ihtiyaç var.
+  lookMtx.invert(); // → desired WORLD transform
 
-  // 5) Filtrelenmiş Euler değerleriyle objenin rotasyonunu güncelle
-  object.rotation.set(
-    axes.x ? newEuler.x : origEuler.x,
-    axes.y ? newEuler.y : origEuler.y,
-    axes.z ? newEuler.z : origEuler.z,
-    object.rotation.order  // mevcut dönüş sırasını koru
-  );
+  const desiredWorldQuat = new THREE.Quaternion().setFromRotationMatrix(lookMtx);
+
+  // 2) world quat → LOCAL quat (ebeveyn uzayına aktar)
+  const parentWorldQuat = new THREE.Quaternion();
+  if (object.parent) object.parent.getWorldQuaternion(parentWorldQuat);
+  const parentWorldQuatInv = parentWorldQuat.clone().invert();
+
+  const desiredLocalQuat = desiredWorldQuat.clone().premultiply(parentWorldQuatInv);
+
+  // 3) Euler’lere çevir ve eksen kilitle
+  const desiredEuler = new THREE.Euler().setFromQuaternion(desiredLocalQuat, 'XYZ');
+  const currentEuler = object.rotation.clone();
+
+  const useX = axes.x ?? true;
+  const useY = axes.y ?? true;
+  const useZ = axes.z ?? true;
+
+  if (!useX) desiredEuler.x = currentEuler.x;
+  if (!useY) desiredEuler.y = currentEuler.y;
+  if (!useZ) desiredEuler.z = currentEuler.z;
+
+  if (factor.x) desiredEuler.x *= factor.x!;
+  if (factor.y) desiredEuler.y *= factor.y!;
+  if (factor.z) desiredEuler.z *= factor.z!;
+
+  // 4) Uygula (gimbal sıçramalarını azaltmak için normalize et)
+  object.rotation.set(desiredEuler.x, desiredEuler.y, desiredEuler.z, 'XYZ');
+}
+
+export function getLookAtQuaternion(source: THREE.Object3D, target: THREE.Vector3) {
+  const m = new THREE.Matrix4();
+  const resultQuat = new THREE.Quaternion();
+
+  // Kamera gibi: source'un mevcut konumundan hedefe bakacak bir matris kur
+  m.lookAt(source.position, target, source.up);
+
+  // Matrix'ten quaternion çıkar
+  resultQuat.setFromRotationMatrix(m);
+
+  return resultQuat;
+}
+
+export function getLookAtEuler(source: THREE.Object3D, target: THREE.Vector3) {
+  const q = getLookAtQuaternion(source, target)
+  const euler = new THREE.Euler().setFromQuaternion(q, "YXZ");
+  return euler;
 }
 
 export function lookAtYawOnly(object, targetPos) {
@@ -404,6 +464,22 @@ export function lookAtYawOnly(object, targetPos) {
   // XZ düzlemindeki açı: atan2(X farkı, Z farkı)
   const yaw = Math.atan2(dir.x, dir.z);
   object.rotation.z = -yaw;
+}
+
+export function lookAtYewOnly(object, targetPos, flow) {
+  const pos = object.getWorldPosition(new THREE.Vector3());
+  const dir = new THREE.Vector3().subVectors(targetPos, pos);
+  // XZ düzlemindeki açı: atan2(X farkı, Z farkı)
+  const yaw = Math.atan2(dir.x, dir.z);
+  flow(yaw, object)
+}
+
+export function lookAtYuwOnly(object, targetPos, flow) {
+  const pos = object.getWorldPosition(new THREE.Vector3());
+  const dir = new THREE.Vector3().subVectors(targetPos, pos);
+  // XZ düzlemindeki açı: atan2(X farkı, Z farkı)
+  const yaw = Math.atan2(dir.x, dir.y);
+  flow(yaw, object)
 }
 
 // Utils.tsx dosyasının sonuna veya ThreeAim.jsx tepeye ekleyin
@@ -423,7 +499,160 @@ export function clipOnlyUpperBody(originalClip: THREE.AnimationClip) {
   );
 }
 
+export class XZChecker {
+  /** --- LOW-LEVEL: 2D point-in-polygon (XZ), ray-casting --- */
+  static pointInPolyXZ(
+    px: number, pz: number,
+    vx: Float32Array, vz: Float32Array,
+    count: number,
+    eps = 1e-8
+  ): boolean {
+    // AABB early-out
+    let minX = vx[0], maxX = vx[0], minZ = vz[0], maxZ = vz[0];
+    for (let i = 1; i < count; i++) {
+      const x = vx[i], z = vz[i];
+      if (x < minX) minX = x; if (x > maxX) maxX = x;
+      if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+    }
+    if (px < minX - eps || px > maxX + eps || pz < minZ - eps || pz > maxZ + eps) return false;
 
+    // Kenar üzerinde mi? (boundary-inclusive)
+    for (let i = 0, j = count - 1; i < count; j = i++) {
+      const x1 = vx[j], z1 = vz[j];
+      const x2 = vx[i], z2 = vz[i];
+      const dx = x2 - x1, dz = z2 - z1;
+      const denom = dx * dx + dz * dz;
+      if (denom <= eps) continue;              // <-- degenerate edge guard
+      const t = ((px - x1) * dx + (pz - z1) * dz) / denom;
+      if (t >= -eps && t <= 1 + eps) {
+        const cx = x1 + t * dx, cz = z1 + t * dz;
+        const d2 = (px - cx) * (px - cx) + (pz - cz) * (pz - cz);
+        if (d2 <= eps * eps) return true;
+      }
+    }
+
+    // Ray-casting (even-odd) — bölme-by-zero güvenli
+    let inside = false;
+    for (let i = 0, j = count - 1; i < count; j = i++) {
+      const xi = vx[i], zi = vz[i];
+      const xj = vx[j], zj = vz[j];
+      const ziAbove = zi > pz, zjAbove = zj > pz;
+      if (ziAbove !== zjAbove) {
+        const t = (pz - zi) / (zj - zi);                   // zj != zi burada garanti
+        const xInt = xi + t * (xj - xi);
+        if (px <= xInt) inside = !inside;
+      }
+    }
+    return inside;
+  }
+
+  /** --- LOW-LEVEL: convex polygon testi (daha hızlı) ---
+   *  Not: Köşeler CW ya da CCW sıralı olmalı. */
+  static pointInConvexXZ(
+    px: number, pz: number,
+    vx: Float32Array, vz: Float32Array,
+    count: number,
+    eps = 1e-8
+  ): boolean {
+    // AABB early-out
+    let minX = vx[0], maxX = vx[0], minZ = vz[0], maxZ = vz[0];
+    for (let i = 1; i < count; i++) {
+      const x = vx[i], z = vz[i];
+      if (x < minX) minX = x; if (x > maxX) maxX = x;
+      if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+    }
+    if (px < minX - eps || px > maxX + eps || pz < minZ - eps || pz > maxZ + eps) return false;
+
+    let sign = 0;
+    for (let i = 0; i < count; i++) {
+      const i2 = (i + 1) % count;
+      const ax = vx[i], az = vz[i];
+      const bx = vx[i2], bz = vz[i2];
+      const cross = (bx - ax) * (pz - az) - (bz - az) * (px - ax);
+      if (Math.abs(cross) <= eps) continue;
+      const s = cross > 0 ? 1 : -1;
+      if (sign === 0) sign = s;
+      else if (s !== sign) return false;
+    }
+    return true;
+  }
+
+  /** scratch’lar: GC azaltmak için */
+  static _tmpWorld = new THREE.Vector3();
+  static _vx4 = new Float32Array(4);
+  static _vz4 = new Float32Array(4);
+
+  /** --- HIGH-LEVEL: tek seferlik kullanım (tahsisatsız) --- */
+  static isInsideXZQuad(
+    obj: THREE.Object3D,
+    quad: [THREE.Vector3, THREE.Vector3, THREE.Vector3, THREE.Vector3],
+    opts?: { convex?: boolean; epsilon?: number }
+  ): boolean {
+    const eps = opts?.epsilon ?? 1e-8;
+    const vx = XZChecker._vx4, vz = XZChecker._vz4;   // <-- reuse
+    vx[0] = quad[0].x; vz[0] = quad[0].z;
+    vx[1] = quad[1].x; vz[1] = quad[1].z;
+    vx[2] = quad[2].x; vz[2] = quad[2].z;
+    vx[3] = quad[3].x; vz[3] = quad[3].z;
+
+    obj.getWorldPosition(XZChecker._tmpWorld);
+    const px = XZChecker._tmpWorld.x, pz = XZChecker._tmpWorld.z;
+
+    return (opts?.convex ?? false)
+      ? XZChecker.pointInConvexXZ(px, pz, vx, vz, 4, eps)
+      : XZChecker.pointInPolyXZ(px, pz, vx, vz, 4, eps);
+  }
+
+  /** --- HIGH-LEVEL: her frame için optimize checker (precompute + AABB) --- */
+  static createXZQuadChecker(
+    quad: [THREE.Vector3, THREE.Vector3, THREE.Vector3, THREE.Vector3],
+    opts?: { convex?: boolean; epsilon?: number }
+  ) {
+    const eps = opts?.epsilon ?? 1e-8;
+    const isConvex = !!opts?.convex;
+
+    const vx = new Float32Array(4);
+    const vz = new Float32Array(4);
+    for (let i = 0; i < 4; i++) { vx[i] = quad[i].x; vz[i] = quad[i].z; }
+
+    // Precomputed AABB (O(1) early-out)
+    let minX = vx[0], maxX = vx[0], minZ = vz[0], maxZ = vz[0];
+    for (let i = 1; i < 4; i++) {
+      const x = vx[i], z = vz[i];
+      if (x < minX) minX = x; if (x > maxX) maxX = x;
+      if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+    }
+    const aabbTest = (px: number, pz: number) =>
+      !(px < minX - eps || px > maxX + eps || pz < minZ - eps || pz > maxZ + eps);
+
+    return {
+      containsObj(obj: THREE.Object3D): boolean {
+        obj.getWorldPosition(XZChecker._tmpWorld);
+        const px = XZChecker._tmpWorld.x, pz = XZChecker._tmpWorld.z;
+        if (!aabbTest(px, pz)) return false;
+        return isConvex
+          ? XZChecker.pointInConvexXZ(px, pz, vx, vz, 4, eps)
+          : XZChecker.pointInPolyXZ(px, pz, vx, vz, 4, eps);
+      },
+      containsXZ(px: number, pz: number): boolean {
+        if (!aabbTest(px, pz)) return false;
+        return isConvex
+          ? XZChecker.pointInConvexXZ(px, pz, vx, vz, 4, eps)
+          : XZChecker.pointInPolyXZ(px, pz, vx, vz, 4, eps);
+      },
+      updateQuad(newQuad: [THREE.Vector3, THREE.Vector3, THREE.Vector3, THREE.Vector3]) {
+        for (let i = 0; i < 4; i++) { vx[i] = newQuad[i].x; vz[i] = newQuad[i].z; }
+        // AABB’yi güncelle
+        minX = maxX = vx[0]; minZ = maxZ = vz[0];
+        for (let i = 1; i < 4; i++) {
+          const x = vx[i], z = vz[i];
+          if (x < minX) minX = x; if (x > maxX) maxX = x;
+          if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+        }
+      }
+    };
+  }
+}
 
 export class LerpManager {
   action = null
@@ -546,6 +775,212 @@ export class FabrikLeftArm {
   }
 }
 
+export class Missile {
+  trajectoryLine: any;
+  intervalID: any;
+  damage = 20;
+  /**
+   * @param {THREE.Vector3} startPosition Füzenin başlangıç konumu.
+   * @param {THREE.Vector3} targetPosition Füzenin hedef konumu.
+   * @param {number} flightTime Füzenin hedefe ulaşması için istenen süre (saniye).
+   * @param {number} gravity İvme katsayısı (genellikle pozitif, örn: 9.8).
+   * @param {THREE.Scene} scene Füzenin ekleneceği Three.js sahnesi.
+   */
+  constructor(startPosition, targetPosition, flightTime, gravity, scene) {
+    // --- Yapılandırma ve Durum ---
+    this.gravity = gravity;
+    this.flightTime = flightTime;
+    this.timeElapsed = 0;
+    this.isFlying = true;
+
+    // --- Geometri ---
+    // Primitive füze (küçük bir küre kullanabiliriz)
+    const geometry = new THREE.SphereGeometry(0.1, 8, 8);
+    const material = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+    this.mesh = new THREE.Mesh(geometry, material);
+    this.mesh.position.copy(startPosition);
+    scene.add(this.mesh);
+
+    // --- Balistik Hesaplamalar ---
+    this.startPos = startPosition.clone();
+    this.targetPos = targetPosition.clone();
+
+    // Hedef ve başlangıç arasındaki yatay (x-z) mesafeyi bul
+    const distanceXZ = new THREE.Vector2(this.targetPos.x - this.startPos.x, this.targetPos.z - this.startPos.z).length();
+
+    // Hedef ve başlangıç arasındaki dikey (y) mesafeyi bul
+    const deltaY = this.targetPos.y - this.startPos.y;
+
+    // X-Z düzlemindeki yatay hız (Vxz)
+    // Vxz = Yatay Mesafe / Uçuş Süresi
+    const vxz = distanceXZ / flightTime;
+
+    // Y düzlemindeki başlangıç hızı (Vy0)
+    // Balistik denkleminden türetilmiştir: Y = Y0 + Vy0*t - 0.5*g*t^2
+    // Vy0 = (deltaY + 0.5 * g * t^2) / t
+    this.vy0 = (deltaY + 0.5 * this.gravity * flightTime * flightTime) / flightTime;
+
+    // Füzenin XZ yönündeki hareket vektörü (birim vektör * hız)
+    const directionXZ = new THREE.Vector3(this.targetPos.x - this.startPos.x, 0, this.targetPos.z - this.startPos.z).normalize();
+    this.velocityXZ = directionXZ.multiplyScalar(vxz);
+  }
+
+
+  /**
+   * Füzenin uçuş yolu üzerindeki noktaları hesaplar.
+   * @param {THREE.Vector3} startPos Başlangıç konumu.
+   * @param {THREE.Vector3} targetPos Hedef konumu.
+   * @param {number} flightTime Uçuş süresi.
+   * @param {number} gravity Yerçekimi ivmesi (örn: 9.8).
+   * @param {number} segments Yörüngeyi kaç parçaya böleceği.
+   * @returns {THREE.Vector3[]} Yörünge üzerindeki noktaların dizisi.
+   */
+  calculateTrajectoryPoints(startPos, targetPos, flightTime, gravity, segments = 50) {
+    const points = [];
+
+    // Geçici olarak hız bileşenlerini hesapla
+    const distanceXZ = new THREE.Vector2(targetPos.x - startPos.x, targetPos.z - startPos.z).length();
+    const deltaY = targetPos.y - startPos.y;
+
+    const vxz = distanceXZ / flightTime;
+    const vy0 = (deltaY + 0.5 * gravity * flightTime * flightTime) / flightTime;
+
+    const directionXZ = new THREE.Vector3(targetPos.x - startPos.x, 0, targetPos.z - startPos.z).normalize();
+    const velocityXZ = directionXZ.multiplyScalar(vxz);
+
+    // Her segment için konumu hesapla
+    for (let i = 0; i <= segments; i++) {
+      const t = (i / segments) * flightTime;
+
+      const newPos = new THREE.Vector3();
+
+      // X ve Z: X(t) = X0 + Vxz * t
+      newPos.x = startPos.x + velocityXZ.x * t;
+      newPos.z = startPos.z + velocityXZ.z * t;
+
+      // Y: Y(t) = Y0 + Vy0 * t - 0.5 * g * t^2
+      newPos.y = startPos.y + (vy0 * t) - (0.5 * gravity * t * t);
+
+      points.push(newPos);
+    }
+
+    return points;
+  }
+
+  /**
+   * Füzenin uçuşunu yeni bir hedef ve/veya yeni bir başlangıç konumuyla başlatır.
+   * @param {THREE.Vector3} newStartPosition (Opsiyonel) Yeni başlangıç konumu.
+   * @param {THREE.Vector3} newTargetPosition Yeni hedef konumu.
+   * @param {number} newFlightTime (Opsiyonel) Yeni uçuş süresi.
+   */
+  reset(newStartPosition, newTargetPosition, newFlightTime) {
+    // 1. Durumu Sıfırla
+    this.timeElapsed = 0;
+    this.isFlying = true;
+
+    // 2. Konumları Güncelle
+    this.startPos.copy(newStartPosition || this.mesh.position); // Yeni başlangıç konumu varsa kullan, yoksa mevcut konumu kullan
+    this.targetPos.copy(newTargetPosition);
+    this.flightTime = newFlightTime || this.flightTime;
+
+    // Füze modelini başlangıç konumuna taşı
+    this.mesh.position.copy(this.startPos);
+
+    // 3. Balistik Hızları Yeniden Hesapla
+    const distanceXZ = new THREE.Vector2(this.targetPos.x - this.startPos.x, this.targetPos.z - this.startPos.z).length();
+    const deltaY = this.targetPos.y - this.startPos.y;
+
+    // Vxz = Yatay Mesafe / Uçuş Süresi
+    const vxz = distanceXZ / this.flightTime;
+
+    // Vy0 = (deltaY + 0.5 * g * t^2) / t
+    this.vy0 = (deltaY + 0.5 * this.gravity * this.flightTime * this.flightTime) / this.flightTime;
+
+    // Yeni XZ hareket vektörünü hesapla
+    const directionXZ = new THREE.Vector3(this.targetPos.x - this.startPos.x, 0, this.targetPos.z - this.startPos.z).normalize();
+    this.velocityXZ = directionXZ.multiplyScalar(vxz);
+
+    // console.log("Füze tekrar fırlatılmaya hazır.");
+  }
+
+  /**
+   * Füzenin konumunu zamanla günceller. Bu fonksiyon `requestAnimationFrame` döngüsü içinde çağrılmalıdır.
+   * @param {number} deltaTime Geçen süre (saniye).
+   */
+  update(deltaTime) {
+    if (!this.isFlying) return;
+
+    this.timeElapsed += deltaTime;
+    const t = this.timeElapsed;
+
+    // Eğer süre dolduysa, uçuşu durdur ve hedefe tam olarak konumlandır.
+    if (t >= this.flightTime) {
+      this.mesh.position.copy(this.targetPos);
+      this.isFlying = false;
+      // console.log("Füze hedefe ulaştı.");
+      return;
+    }
+
+    // --- Yeni Konum Hesaplaması (Balistik Denklemler) ---
+
+    // X ve Z koordinatları (Sabit Hız)
+    this.mesh.position.x = this.startPos.x + this.velocityXZ.x * t;
+    this.mesh.position.z = this.startPos.z + this.velocityXZ.z * t;
+
+    // Y koordinatı (Yerçekimi Etkisi)
+    // Y(t) = Y0 + Vy0 * t - 0.5 * g * t^2
+    this.mesh.position.y = this.startPos.y + (this.vy0 * t) - (0.5 * this.gravity * t * t);
+  }
+
+  // İsteğe bağlı: Kırmızı Kesik Çizgiyi (Trajectory) çizmek için
+  // Bu, yörüngeyi önceden görselleştirmek için kullanılır.
+  createTrajectoryLine(startPos, targetPos, flightTime, gravity, segments = 50) {
+    // *** YENİ ÇAĞRI ***
+    const points = this.calculateTrajectoryPoints(startPos, targetPos, flightTime, gravity, segments);
+    // *******************
+
+    const geometry = new THREE.BufferGeometry().setFromPoints(points);
+    const material = new THREE.LineDashedMaterial({
+      color: 0xff0000,
+      linewidth: 1,
+      scale: 1,
+      dashSize: 0.2,
+      gapSize: 0.1,
+    });
+
+    const line = new THREE.Line(geometry, material);
+    line.computeLineDistances();
+    this.trajectoryLine = line
+    return line;
+  }
+
+  setInterval(sourcePos: any, targetPos: () => THREE.Vector3, desiredFlightTime: any, gravity: any, onTouchGround: (lastPoint: THREE.Vector3) => void) {
+    if (this.intervalID != undefined) {
+      clearInterval(this.intervalID)
+      console.log("cleared")
+    } else {
+      console.log("not cleared:", this.intervalID)
+    }
+    var lastPoint: THREE.Vector3 = targetPos()
+    this.intervalID = setInterval(() => {
+      onTouchGround(lastPoint)
+
+      lastPoint = targetPos()
+      const newPoints = this.calculateTrajectoryPoints(sourcePos, targetPos(), desiredFlightTime,
+        gravity);
+      if (this.trajectoryLine?.geometry != undefined) {
+        this.trajectoryLine?.geometry.setFromPoints(newPoints);
+        this.trajectoryLine.geometry.attributes.position.needsUpdate = true;
+        this.trajectoryLine?.computeLineDistances(); // Kesikli çizgiyi korumak için
+      }
+      this.reset(
+        sourcePos,
+        targetPos(),
+        desiredFlightTime)
+    }, desiredFlightTime * 1000 + 100);
+  }
+}
+
 export class MuzzleFlashAnimator {
   private textures: THREE.Texture[] = [];
   private sprite!: THREE.Sprite;
@@ -564,7 +999,8 @@ export class MuzzleFlashAnimator {
     private imagePaths: string[],
     private frameDuration: number,
     private loop: boolean,
-    private random: boolean
+    private random: boolean,
+    private positionOffset: THREE.Vector3 = new THREE.Vector3(0, 0.08, 0.7)
   ) {
     this.loadTextures();
   }
@@ -593,7 +1029,7 @@ export class MuzzleFlashAnimator {
       })
     );
     this.sprite.scale.set(0.5, 0.5, 1);
-    this.sprite.position.set(0, 0.08, 0.7);
+    this.sprite.position.set(this.positionOffset.x, this.positionOffset.y, this.positionOffset.z);
     this.sprite.visible = false;
     this.rifle.add(this.sprite);
   }
