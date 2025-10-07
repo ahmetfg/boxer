@@ -12,14 +12,9 @@ code {
 }
 
 :root {
-  /* Fallback olarak % veya vh kullanılıyor, ama js güncelleyince burası override olur */
   --vvw: 100vw;
   --vvh: 100vh;
-  /* Oranı hesapla, sonra birimle çarp */
   --aspect-ratio: calc(var(--vvh) / var(--vvw));
-  /* transform: translate(calc(var(--vvh)*0.0),calc(var(--vvh)*0.5)) rotate(90deg); */
-  /* transform: translate(calc(var(--vvh)*0.5), calc(var(--vvh)*0.5)) rotate(90deg); */
-  /* transform: translate(calc(var(--vvh)/var(--vvw)),calc(var(--vvh)/var(--vvw))); */
 }
 
 /* Örnek: joystick % yerine gerçek görüntü yüksekliğinin %20’si olsun */
