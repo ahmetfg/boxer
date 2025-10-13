@@ -3,6 +3,7 @@ import * as THREE from "three";
 // Object3D'ye extension
 declare module "three" {
   interface Object3D {
+    setPosition(value:THREE.Vector3): undefined;
     worldPosition(): THREE.Vector3;
     worldQuaternion(): THREE.Quaternion;
   }
@@ -19,4 +20,7 @@ THREE.Object3D.prototype.worldQuaternion = function (
   const w = new THREE.Quaternion();
   this.getWorldQuaternion(w)
   return w;
+};
+THREE.Object3D.prototype.setPosition = function (vec): undefined {
+  this.position.set(vec.x,vec.y,vec.z)
 };

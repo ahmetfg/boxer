@@ -2,132 +2,46 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import * as utils from './Utils.tsx';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader';
-// import { TransformControls } from 'three/examples/jsm/controls/TransformControls';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { GUI, color } from 'dat.gui';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import Joystick from './Joystick.tsx'; // Joystick bileşenini import et
 import './Extensions.tsx'
+import { SceneManager } from "./SceneManager.tsx";
+import { Turret } from "./Turret.tsx";
+import { Base } from './Base.tsx';
+import { PerkArea } from './PerkArea.tsx';
+import { AnimationBag } from './AnimationBag.tsx';
 const BASE = process.env.PUBLIC_URL;  // → "/boxer"
 
-var deltaTime: number;
+export var deltaTime: number;
 var muzzle: utils.MuzzleFlashAnimator
-var turretMuzzle: utils.MuzzleFlashAnimator
 let fireWeight = 0;   // anlık ağırlık
 let fireTarget = 0;   // hedef ağırlık (0 veya 1)
 const FIRE_LERP_K = 20;   // hız katsayısı (büyüdükçe daha hızlı)
-// const isLandscape = window.matchMedia("(orientation: landscape)").matches;
 
 // Hedefleri tek bir yerde topla
-var targetBox: THREE.Object3D;
 var turret: Turret;
-var fovController = new utils.LerpManager();
-var perkTurret15: PerkArea;
+export var fovController = new utils.LerpManager();
 var perkAmmo5: PerkArea;
-var rayVisualizer: THREE.ArrowHelper;
 
 // Kontrol için bir ayarlar nesnesi oluşturalım
-const settings = {
+export const settings = {
     transitionX: 0.0, // 0'dan 1'e kadar gidecek slider değeri
     transitionY: 0.0 // 0'dan 1'e kadar gidecek slider değeri
 };
-var someBool = false
+export var someBool = false
 
 // --- Parametreler ---
 const gravity = 2.8;        // Yerçekimi ivmesi (m/s^2)
 const desiredFlightTime = 2.5; // Hedefe 2 saniyede ulaşsın.
 const missileDamageDistance = 2; // Hedefe 2 saniyede ulaşsın.
-var ammoAnimationMixer: THREE.AnimationMixer;
+var animationBag: AnimationBag = new AnimationBag();
 
 // Kaynak (Atan oyuncu)
 const sourcePos = new THREE.Vector3(0, 1.5, 7);
 
-// --- Füze Oluşturma ---
-var missile: utils.Missile;
-
-class Turret {
-    head: THREE.Object3D;
-    neck: THREE.Object3D;
-    legs: THREE.Object3D;
-    headVerticalLerp: utils.LerpManager;
-    headHorizontalLerp: utils.LerpManager;
-    neckHorizontalLerp: utils.LerpManager;
-    visulize = () => { }
-
-    constructor(parent: THREE.Object3D, onShootTarget: () => void, check: () => boolean) {
-        this.head = parent.getObjectByName("Head") as THREE.Object3D
-        this.neck = parent.getObjectByName("Neck") as THREE.Object3D
-        this.legs = parent.getObjectByName("Legs") as THREE.Object3D
-        this.headVerticalLerp = new utils.LerpManager()
-        this.headHorizontalLerp = new utils.LerpManager()
-        this.neckHorizontalLerp = new utils.LerpManager()
-
-        this.headHorizontalLerp.setActions(
-            (x: number) => this.head.rotation.x = x,
-            () => this.neck.rotation.x
-        )
-
-        this.neckHorizontalLerp.setActions(
-            (y: number) => this.neck.rotation.y = y,
-            () => this.neck.rotation.y
-        )
-
-        turretMuzzle = new utils.MuzzleFlashAnimator(this.head, [
-            `${BASE}/textures/shoot1.png`,
-            `${BASE}/textures/shoot2.png`,
-            `${BASE}/textures/shoot3.png`,
-            `${BASE}/textures/shoot4.png`,
-            `${BASE}/textures/shoot5.png`,
-        ], 50, true, true, new THREE.Vector3(0.06, 0, 0.28));
-        var a = false
-        setInterval(() => {
-            a = !a
-            if (a && perkTurret15.isActive) {
-                turretMuzzle.play()
-                if (check()) {
-                    onShootTarget()
-                }
-            } else {
-                turretMuzzle.stop()
-            }
-        }, 300);
-    }
-
-    update() {
-        this.headVerticalLerp.update()
-        this.headHorizontalLerp.update()
-        this.neckHorizontalLerp.update()
-        // this.visulize()
-    }
-
-    setNewTarget(target: any) {
-        const neckOld = this.neck.quaternion.clone()
-        const headOld = this.head.quaternion.clone()
-        utils.lookAtYewOnly(this.neck, target.position, (rot: number, object: any) => {
-            object.rotation.y = rot
-        })
-        this.head.lookAt(target.position)
-
-        this.headHorizontalLerp.push(this.head.rotation.x, 0.01)
-        this.neckHorizontalLerp.push(this.neck.rotation.y, 0.01)
-
-        this.neck.setRotationFromQuaternion(neckOld)
-        this.head.setRotationFromQuaternion(headOld)
-    }
-
-    hide() {
-        this.head.visible = false
-        this.neck.visible = false
-        this.legs.visible = false
-    }
-
-    show() {
-        this.head.visible = true
-        this.neck.visible = true
-        this.legs.visible = true
-    }
-}
-class Player {
+export class Player {
     player: THREE.Object3D;
     playerSurface: THREE.Object3D;
     idleFireAction: THREE.AnimationAction;
@@ -326,10 +240,6 @@ class Player {
                             this.camera.position.setX(this.camera.position.x - .2)
                             this.camera.position.setY(this.camera.position.y + .1)
                         }
-                        // hide floor
-                        const floor = model.getObjectByName("Floor") as THREE.Object3D;
-                        floor.visible = false
-
 
                         this.spineController = new utils.SpineAimController({
                             spineBone: this.spine,
@@ -350,7 +260,7 @@ class Player {
                         );
 
                         if (!this.puppet) {
-                            utils.SceneManager.instance.register(this.scene, this.renderer, [this.mixer])
+                            SceneManager.instance.register(this.scene, this.renderer, [this.mixer])
                         }
                         this.didInit = true
                         resolve(null)
@@ -535,101 +445,14 @@ class Player {
         this.idleChrouchActionLerp?.clear()
         if (beforeClear) beforeClear()
         setTimeout(() => {
-            utils.SceneManager.instance.disposeAllExceptLast()
+            SceneManager.instance.disposeAllExceptLast()
             ////console.log("clear")
             if (didClear) didClear()
         }, 3000);
 
     }
 }
-class PerkArea {
-    mesh: THREE.Object3D;
-    quad: [THREE.Vector3, THREE.Vector3, THREE.Vector3, THREE.Vector3];
-    checker: object;
-    player: THREE.Object3D;
-    didEnd = true;
-    onActivate = () => { };
-    onReactivate = () => { };
-    id?: number | undefined;
-    frameCountForPass: number | undefined = 2000
-    frameCountForReactivate: number | undefined = undefined
-    cost: number;
-    isActive: boolean = false;
-    visulizeArea: boolean = true;
-    visuliseDots: any;
 
-    constructor(scene: THREE.Scene, mesh: THREE.Object3D, quad: [THREE.Vector3, THREE.Vector3, THREE.Vector3, THREE.Vector3], player: THREE.Object3D, cost: number, frameCountForPass?: number | undefined, frameCountForReactivate?: number | undefined) {
-        // 2) her frame için hızlı versiyon:
-        this.checker = utils.XZChecker.createXZQuadChecker(quad, { convex: true }); // dışbükeyse true → daha hızlı
-        this.player = player
-        this.cost = cost
-        this.frameCountForPass = frameCountForPass
-        this.mesh = mesh
-        this.quad = quad
-        this.frameCountForReactivate = frameCountForReactivate
-
-        // make it more crisp
-        this.mesh!.material.map.anisotropy = 2
-
-        if (this.visulizeArea) {
-            this.visuliseDots = [
-                utils.AddDebugSphere(scene, .1, 0xff0000ff),
-                utils.AddDebugSphere(scene, .1, 0xff0000ff),
-                utils.AddDebugSphere(scene, .1, 0xff0000ff),
-                utils.AddDebugSphere(scene, .1, 0xff0000ff)
-            ]
-            this.visuliseDots[0].position.set(this.quad[0].x, this.quad[0].y, this.quad[0].z)
-            this.visuliseDots[1].position.set(this.quad[1].x, this.quad[1].y, this.quad[1].z)
-            this.visuliseDots[2].position.set(this.quad[2].x, this.quad[2].y, this.quad[2].z)
-            this.visuliseDots[3].position.set(this.quad[3].x, this.quad[3].y, this.quad[3].z)
-        }
-    }
-
-    update(balance: number) {
-        if (this.isActive == false && this.checker && balance >= this.cost) {
-            if (this.checker.containsObj(this.player)) {
-                if (this.didEnd == true) {
-                    // console.log("start")
-                    this.didEnd = false;
-                    this.clearPassTimeout()
-
-                    this.id = setTimeout(() => {
-                        if (this.didEnd == false) {
-                            this.isActive = true
-                            this.onActivate()
-
-                            if (this.frameCountForReactivate != undefined) {
-                                setTimeout(() => {
-                                    this.isActive = false
-                                    this.onReactivate()
-                                    this.clearPassTimeout()
-                                }, this.frameCountForReactivate);
-                            } else {
-                                this.clearPassTimeout()
-                            }
-                        }
-                    }, this.frameCountForPass);
-                }
-                // içerde
-                return true
-            } else {
-                this.clearPassTimeout()
-                // dışarda
-                return false
-            }
-        } else {
-        }
-    }
-
-    clearPassTimeout() {
-        if (this.id != undefined) {
-            // console.log("end")
-            clearTimeout(this.id)
-            this.didEnd = true;
-            this.id = undefined
-        }
-    }
-}
 export default function ThreeScene({ }) {
     const getInitialOrientation = () => {
         const isLandscape = window.matchMedia("(orientation: landscape)").matches;
@@ -650,7 +473,6 @@ export default function ThreeScene({ }) {
     const [ammoPercent, setAmmoPercent] = useState(100);
     const isRunningRef = useRef(isRunning);
     const isChrouchingRef = useRef(isChrouching);
-    // References to core Three.js objects
     const sceneRef = useRef<THREE.Scene>(null);
     const instance = useRef<Player>(null);
     const opponent = useRef<Player>(null);
@@ -755,14 +577,16 @@ export default function ThreeScene({ }) {
         // if (sceneRef.current == null) {
         const mount = mountRef.current;
         // Cleanup any existing canvas
-        while (mount.firstChild) mount.removeChild(mount.firstChild);
+        while (mount && mount.firstChild) {
+            mount?.removeChild(mount.firstChild);
+        }
         // Scene setup
         const scene = new THREE.Scene();
         sceneRef.current = scene
         const camera = new THREE.PerspectiveCamera(
             60,
             mount.clientWidth / mount.clientHeight,
-            0.1,
+            0.01,
             1000
         );
 
@@ -791,9 +615,10 @@ export default function ThreeScene({ }) {
         mount.appendChild(renderer.domElement);
 
         // Lighting
-        scene.add(new THREE.AmbientLight(0xffffff, 1));
-        const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
-        dirLight.position.y = 3.14;
+        scene.add(new THREE.AmbientLight(0xffffff, 1.2));
+        const dirLight = new THREE.DirectionalLight(0xffffff, 2.5);
+        dirLight.position.y = 2;
+        dirLight.position.x = 0;
         scene.add(dirLight);
 
         const clock = new THREE.Clock();
@@ -866,31 +691,17 @@ export default function ThreeScene({ }) {
                 `${BASE}/models/environment.glb`,
                 gltf => {
                     scene.add(gltf.scene);
-                    targetBox = gltf.scene.getObjectByName("targetObject") as THREE.Object3D
-                    targetBox.position.x = 0
-                    targetBox.position.y = 2
-                    targetBox.position.z = 3
-
-                    targetBox.rotation.y = Math.PI
-
-                    const area15 = gltf.scene.getObjectByName("15CoinFloor") as THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial, THREE.Object3DEventMap>
-                    // make more crisp
-                    // area15.material.map!.anisotropy = 2
-                    // area15.material.map!.generateMipmaps = false
-
+                    SceneManager.base = new Base(scene, instance.current!.player, hittablesRef, { setHealthPercent })
                     // Model veya sahne yüklenirken hedef objeyi ekle:
-                    hittablesRef.current.push(targetBox); // targetBox zaten referansın var
+                    hittablesRef.current.push(SceneManager.base.targetBox); // targetBox zaten referansın var
 
-                    gltf.scene.getObjectByName("box") as THREE.Object3D
-                    ////console.log("register") 
-                    ////console.log(hittablesRef.current.length)
 
-                    const area5 = gltf.scene.getObjectByName("5CoinFloor") as THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial, THREE.Object3DEventMap>
                     const ammo = gltf.scene.getObjectByName("Ammo") as THREE.Object3D
-                    ammoAnimationMixer = new THREE.AnimationMixer(ammo);
-                    const action = ammoAnimationMixer.clipAction(gltf.animations.find((clip: any) => clip.name === 'Ammo_Idle'));
-                    action.play();
-
+                    // ammoAnimationMixer = new THREE.AnimationMixer(ammo);
+                    // const action = ammoAnimationMixer.clipAction(gltf.animations.find((clip: any) => clip.name === 'Ammo_Idle')!);
+                    // action.play();
+                    animationBag.register(ammo, gltf.animations.find((clip: any) => clip.name === 'Ammo_Idle'))
+                    const area5 = gltf.scene.getObjectByName("5CoinFloor") as THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial, THREE.Object3DEventMap>
                     perkAmmo5 = new PerkArea(scene, area5,
                         [
                             new THREE.Vector3(3, 0, -.1),
@@ -916,46 +727,11 @@ export default function ThreeScene({ }) {
                         ammo.visible = true
                     }
 
-                    turret = new Turret(gltf.scene.getObjectByName("Turret") as THREE.Object3D, onShootTarget, () => checkForwardRayIntersection(turret.head, [targetBox], 50))
+                    turret = new Turret(gltf.scene.getObjectByName("Turret") as THREE.Object3D, () => checkForwardRayIntersection(turret.head, hittablesRef.current, 50))
                     turret.hide()
 
-                    turret.visulize = () => {
-                        // 1. Önceki görselleştirmeyi sahneden kaldır
-                        if (rayVisualizer) {
-                            scene.remove(rayVisualizer);
-                            rayVisualizer.dispose(); // Bellek temizliği
-                        }
-
-                        // Vektörlerin hesaplanması
-                        const origin = turret.head.worldPosition();
-
-                        const direction = new THREE.Vector3(0, 0, 1); // Varsayılan: Lokal -Z (Objenin önü)
-                        direction.applyQuaternion(turret.head.worldQuaternion()).normalize(); // Yönü objenin rotasyonuna göre ayarla
-
-                        // 2. Işının rengini belirle (Kesişim varsa kırmızı, yoksa yeşil)
-                        const rayColor = 0xff0000;
-
-                        // 3. Okun uzunluğunu belirle
-                        // Kesişim varsa o mesafeye kadar, yoksa maxDistance kadar uzat.
-                        const arrowLength = 50;
-
-                        // 4. ArrowHelper'ı oluştur
-                        rayVisualizer = new THREE.ArrowHelper(
-                            direction, // Yön vektörü
-                            origin,    // Başlangıç noktası
-                            arrowLength,
-                            rayColor,
-                            0.5, // Ok başı (head) uzunluğu
-                            0.2  // Ok başı (head) kalınlığı
-                        );
-
-                        // 5. ArrowHelper'ı sahneye ekle
-                        scene.add(rayVisualizer);
-                    }
-
-                    // 2) her frame için hızlı versiyon:
-                    // perkTurret15 = utils.XZChecker.createXZQuadChecker(quad, { convex: true }); // dışbükeyse true → daha hızlı
-                    perkTurret15 = new PerkArea(scene, area15,
+                    const area15 = gltf.scene.getObjectByName("15CoinFloor") as THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial, THREE.Object3DEventMap>
+                    SceneManager.perkTurret15 = new PerkArea(scene, area15,
                         [
                             new THREE.Vector3(-1, 0, -.15),
                             new THREE.Vector3(-2.52, 0, -.15),
@@ -967,50 +743,52 @@ export default function ThreeScene({ }) {
                         1000
                     ); // dışbükeyse true → daha hızlı
 
-                    perkTurret15.onActivate = () => {
+                    SceneManager.perkTurret15!.onActivate = () => {
                         turret.show()
-                        turret.setNewTarget(targetBox)
+                        // turret.lastTarget = targetBox
+                        // turret.setNewTarget(targetBox)
                         setBalance(prev => {
-                            return prev - perkTurret15.cost
+                            return prev - SceneManager.perkTurret15!.cost
                         })
                     }
 
-                    missile = new utils.Missile(
+                    SceneManager.missile = new utils.Missile(
                         sourcePos,
                         instance?.current?.player?.worldPosition(),
                         desiredFlightTime,
                         gravity,
-                        scene
+                        scene,
                     );
 
+                    SceneManager.missile.isActive = true
                     // --- Yörünge Çizgisini Ekleme (İsteğe Bağlı) ---
-                    missile.createTrajectoryLine(
+                    SceneManager.missile.createTrajectoryLine(
                         sourcePos,
                         instance?.current?.player?.worldPosition(),
                         desiredFlightTime,
                         gravity
                     );
-                    scene.add(missile.trajectoryLine);
-                    missile.setInterval(
+                    scene.add(SceneManager.missile.trajectoryLine);
+                    SceneManager.missile.setInterval(
                         sourcePos,
-                        () => instance.current?.player.worldPosition(),
+                        () => instance.current?.player?.worldPosition(),
                         desiredFlightTime,
                         gravity,
                         (lastPoint) => {
-                            const dist = lastPoint.distanceTo(instance.current?.player.worldPosition())
+                            const dist = lastPoint.distanceTo(instance.current?.player?.worldPosition())
                             if (dist <= missileDamageDistance) {
                                 // health bar debug
                                 setHealthPercent(prev => {
-                                    if (prev - missile.damage <= 0) {
+                                    if (prev - SceneManager.missile!.damage <= 0) {
                                         window.location.reload()
                                         return 0
                                     }
-                                    return prev - missile.damage
+                                    return prev - SceneManager.missile!.damage
                                 })
                             }
-                            console.log(dist)
                         }
                     )
+
                 },
                 () => ////console.log(`Loading: ${(xhr.loaded / xhr.total * 100).toFixed(1)}%`),
                     (err: any) => console.error('Error loading model:', err));
@@ -1038,7 +816,7 @@ export default function ThreeScene({ }) {
                 // player.rotation.y = params.rootY;
                 // player.rotation.z = params.rootZ;
 
-                perkTurret15?.update(balanceRef.current)
+                SceneManager.perkTurret15?.update(balanceRef.current)
                 perkAmmo5?.update(balanceRef.current)
             }
 
@@ -1052,9 +830,11 @@ export default function ThreeScene({ }) {
             turret?.update()
 
             // Füzenin konumunu güncelle
-            missile?.update(deltaTime);
-            ammoAnimationMixer?.update(deltaTime)
+            SceneManager.missile?.update(deltaTime);
+            // ammoAnimationMixer?.update(deltaTime)
 
+            SceneManager.base?.update(instance.current?.player?.worldPosition())
+            animationBag.update(deltaTime)
             renderer?.render(scene, camera);
             requestAnimationFrame(animate);
         };
@@ -1079,13 +859,15 @@ export default function ThreeScene({ }) {
             instance.current?.onClear()
 
             opponent.current?.onClear(() => {
-                utils.SceneManager.deepDispose(scene, hittablesRef.current[0])
+                SceneManager.deepDispose(scene, hittablesRef.current[0])
                 ////console.log(hittablesRef.current.length)
             }, null)
 
             renderer.dispose();
             if (mount) mount.innerHTML = '';
-            mountRef?.current?.removeChild(renderer.domElement)
+            try {
+                mountRef?.current?.removeChild(renderer?.domElement)
+            } catch { }
         };
         // }
     }, []);
@@ -1164,7 +946,7 @@ export default function ThreeScene({ }) {
         const raycaster = new THREE.Raycaster();
 
         // Vektörlerin hesaplanması
-        const origin = sourceObject.worldPosition();
+        const origin = sourceObject?.worldPosition();
 
         const direction = new THREE.Vector3(0, 0, 1); // Varsayılan: Lokal -Z (Objenin önü)
         direction.applyQuaternion(sourceObject.worldQuaternion()).normalize(); // Yönü objenin rotasyonuna göre ayarla
@@ -1178,9 +960,15 @@ export default function ThreeScene({ }) {
 
         // Eğer kesişim varsa ve ilk kesişen obje *kaynak objenin kendisi değilse*
         if (intersects.length > 0) {
-            // En yakın kesişim bilgisini döndür
+            if (intersects[0].object?.name.includes("Minion") && !intersects[0].object?.parent?.visible) {
+                return false
+            }
+            // console.log("SHOT", intersects[0].object.name, intersects[0].object.visible, intersects[0].object.parent?.visible)
             // return intersects[0];
-            return intersects[0].object == targets[0];
+            // return intersects[0].object == targets[0];
+            turret.findTarget(true)
+            onShootTarget(intersects)
+            return true
         }
 
         // Kesişim yoksa null döndür
@@ -1188,31 +976,44 @@ export default function ThreeScene({ }) {
         return false;
     }
 
-    function onShootTarget() {
-        // const hit = intersects[0];
-        // if (hit.object.name !== "targetObject") return;
+    function onShootTarget(intersects: any = null) {
+        if (intersects) {
+            // console.log(hittablesRef.current)
+            const hit = intersects[0]?.object as THREE.Object3D;
+            // console.log(hit?.name, hit?.name.includes("Minion"))
+            if (hit?.name.includes("Minion") && hit.parent?.visible) {
+                SceneManager.base?.onShoot(hit)
+                // hit.parent!.userData.controller.kill()
+                // base.activeBb8Count -= 1
+                // console.log("minion shot")
+                // hittablesRef.current = hittablesRef.current.filter(x => x !== hit.parent);
+                // turret.lastTarget = targetBox
+            } else {
+                // yeni X,Z konumlarını hesapla
+                const newX = utils.getRandomFloat(-2, 2);
+                const newY = utils.getRandomFloat(0.5, 3);
 
-        // yeni X,Z konumlarını hesapla
-        const newX = utils.getRandomFloat(-2, 2);
-        const newY = utils.getRandomFloat(0.5, 3);
+                // taşı
+                SceneManager.base.targetBox.position.set(newX, newY, SceneManager.base.targetBox.position.z);
+                setBalance(prev => {
+                    return prev + 1
+                })
 
-        // taşı
-        targetBox.position.set(newX, newY, targetBox.position.z);
-        setBalance(prev => {
-            return prev + 1
-        })
+                // health bar debug
+                // setOpponentHealthPercent(prev => {
+                //     if (prev - 10 <= 0) {
+                //         return 100
+                //     }
+                //     return prev - 10
+                // })
 
-        // health bar debug
-        setOpponentHealthPercent(prev => {
-            if (prev - 10 <= 0) {
-                return 100
+                // turret to target lerp
+                // turret.setNewTarget(targetBox)
             }
-            return prev - 10
-        })
+        }
 
-        // turret to target lerp
-        turret.setNewTarget(targetBox)
     }
+
     function onShoot() {
         setAmmoPercent(prev => {
             return prev - 10
@@ -1232,7 +1033,7 @@ export default function ThreeScene({ }) {
         const intersects = raycaster.current.intersectObjects(hittablesRef.current, false);
 
         if (intersects.length > 0) {
-            onShootTarget()
+            onShootTarget(intersects)
         }
     }, []);
 
