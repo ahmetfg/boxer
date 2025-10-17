@@ -772,16 +772,16 @@ export default function ThreeScene({ }) {
                 },
                 () => ////console.log(`Loading: ${(xhr.loaded / xhr.total * 100).toFixed(1)}%`),
                     (err: any) => console.error('Error loading model:', err));
-            new GLTFLoader().load(
-                `${BASE}/models/base.glb`,
-                gltf => {
-                    scene.add(gltf.scene);
-                    SceneManager.animationBag.register(gltf.scene, gltf.animations[0])
+            // new GLTFLoader().load(
+            //     `${BASE}/models/base.glb`,
+            //     gltf => {
+            //         scene.add(gltf.scene);
+            //         SceneManager.animationBag.register(gltf.scene, gltf.animations[0])
 
-                },
-                () => ////console.log(`Loading: ${(xhr.loaded / xhr.total * 100).toFixed(1)}%`),
-                    (err: any) => console.error('Error loading model:', err));
-            ////console.log("init done")
+            //     },
+            //     () => ////console.log(`Loading: ${(xhr.loaded / xhr.total * 100).toFixed(1)}%`),
+            //         (err: any) => console.error('Error loading model:', err));
+            // ////console.log("init done")
         }).catch(() => { })
 
         const animate = () => {
