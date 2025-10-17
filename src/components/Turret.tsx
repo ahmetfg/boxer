@@ -72,7 +72,7 @@ export class Turret {
     }
 
 
-     visulize = (scene: THREE.Scene) => {
+    visulize = (scene: THREE.Scene) => {
         // 1. Önceki görselleştirmeyi sahneden kaldır
         if (this.rayVisualizer) {
             scene.remove(this.rayVisualizer);

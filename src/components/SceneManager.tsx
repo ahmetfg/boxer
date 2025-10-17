@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { Base } from "./Base";
 import * as utils from './Utils.tsx';
 import { PerkArea } from './PerkArea.tsx';
+import { AnimationBag } from './AnimationBag.tsx';
+import { Controller } from './NumberEffect.tsx';
 
 type SceneEntry = {
     scene: THREE.Scene
@@ -13,10 +15,14 @@ export class SceneManager {
     private static _instance: SceneManager
     registry = new Map<THREE.Scene, SceneEntry>()
 
+    static PUBLIC_URL = process.env.PUBLIC_URL; 
+
     static base: Base | undefined;
     static perkTurret15: PerkArea | undefined;
     static shootables: Array<THREE.Object3D> = []
     static missile: utils.Missile | undefined;
+    static animationBag: AnimationBag = new AnimationBag();
+    static numberEffectController = new Controller()
 
     private constructor() { }
 

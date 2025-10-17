@@ -1253,6 +1253,7 @@ export class BB8Controller {
     /** Head için yumuşatma (0=anlık, ~5-10 iyi) */
     headYawDamping = 8;
 
+    // maxSpeed = 10;   // tepe hız (units/sec)
     maxSpeed = 1.5;   // tepe hız (units/sec)
     maxAccel = 6.0;   // ivme sınırı (units/sec^2)
     slowRadius = .3;   // bu mesafeden sonra target'a yaklaşırken hız kısılır
@@ -1282,7 +1283,8 @@ export class BB8Controller {
         steer: new THREE.Vector3(),
     };
 
-    kill() {
+    kill(reason = "") {
+        // console.log("kill", reason)
         this.isActive = false
         this.root.visible = false
         this.root.setPosition(this.prefab.position)
@@ -1300,7 +1302,7 @@ export class BB8Controller {
         const { worldTarget, worldPos, disp, flatDir, axis, qRoll, qHeadFrom, qHeadTo, eulerHead, vNorm, steer } = this._tmp;
 
         if (this.root.worldPosition().distanceTo(this.player.worldPosition()) <= this.boomDistance) {
-            this.kill()
+            this.kill("reason: boom")
             this.onBoom(this)
         }
 
@@ -1438,15 +1440,15 @@ export class BB8Controller {
         }
 
         // Head yaw (yumuşatma)
-        if (this.head) {
-            const yaw = Math.atan2(flatDir.x, flatDir.z);
-            this.head.quaternion.copy(
-                this.head.quaternion.slerp(
-                    qHeadTo.setFromEuler(eulerHead.set(0, yaw, 0)),
-                    (1 - Math.exp(-this.headYawDamping * delta))
-                )
-            );
-        }
+        // if (this.head) {
+        //     const yaw = Math.atan2(flatDir.x, flatDir.z);
+        //     this.head.quaternion.copy(
+        //         this.head.quaternion.slerp(
+        //             qHeadTo.setFromEuler(eulerHead.set(0, yaw, 0)),
+        //             (1 - Math.exp(-this.headYawDamping * delta))
+        //         )
+        //     );
+        // }
     }
 
     // --- patch: allocation'sız

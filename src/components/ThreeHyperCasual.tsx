@@ -1,9 +1,8 @@
 // src/components/ThreeScene.jsx
-import React, { useRef, useEffect, useState, useCallback } from 'react';
+import React, { useRef, useEffect, useState, useCallback, KeyboardEvent, useMemo } from 'react';
 import * as THREE from 'three';
 import * as utils from './Utils.tsx';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { GUI, color } from 'dat.gui';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import Joystick from './Joystick.tsx'; // Joystick bileşenini import et
 import './Extensions.tsx'
@@ -11,7 +10,8 @@ import { SceneManager } from "./SceneManager.tsx";
 import { Turret } from "./Turret.tsx";
 import { Base } from './Base.tsx';
 import { PerkArea } from './PerkArea.tsx';
-import { AnimationBag } from './AnimationBag.tsx';
+import { Shield } from './Shield.tsx';
+import LevelUpMenu from './LevelUpMenu.tsx';
 const BASE = process.env.PUBLIC_URL;  // → "/boxer"
 
 export var deltaTime: number;
@@ -36,12 +36,14 @@ export var someBool = false
 const gravity = 2.8;        // Yerçekimi ivmesi (m/s^2)
 const desiredFlightTime = 2.5; // Hedefe 2 saniyede ulaşsın.
 const missileDamageDistance = 2; // Hedefe 2 saniyede ulaşsın.
-var animationBag: AnimationBag = new AnimationBag();
+const isMissileActive = true
 
 // Kaynak (Atan oyuncu)
 const sourcePos = new THREE.Vector3(0, 1.5, 7);
 
 export class Player {
+    shield: Shield;
+
     player: THREE.Object3D;
     playerSurface: THREE.Object3D;
     idleFireAction: THREE.AnimationAction;
@@ -69,6 +71,7 @@ export class Player {
     hips: THREE.Object3D;
     spineController: utils.SpineAimController
     rifleOffset = new THREE.Vector3(26.76, 110.1, 13.96)
+    vestAttachOne: THREE.Object3D;
     // aimSpineOffset = new THREE.Vector3(-4, -43.67, 0)
     aimSpineOffset = new THREE.Vector3(0, -48, 0)
     riflePositionOffset = new THREE.Vector3(3.59, 7.86, 3.23)
@@ -234,6 +237,7 @@ export class Player {
                         this.hips = model.getObjectByName("mixamorigHips") as THREE.Object3D;
                         this.player = model.getObjectByName("Right") as THREE.Object3D;
                         this.playerSurface = model.getObjectByName("Alpha_Surface") as THREE.Object3D;
+                        this.vestAttachOne = model.getObjectByName("Bone") as THREE.Object3D;
 
                         if (!this.puppet) {
                             this.aimSphere.attach(this.camera)
@@ -467,9 +471,10 @@ export default function ThreeScene({ }) {
     const [isChrouching, setIsChrouching] = useState(false);
     const [crossSize, setCrossize] = useState(.01);
     const [balance, setBalance] = useState(0);
+    const [level, setNextLevel] = useState(1);
     const balanceRef = useRef(balance);
     const [healthPercent, setHealthPercent] = useState(100);
-    const [opponentHealthPercent, setOpponentHealthPercent] = useState(100);
+    const [nextLevelPercent, setNextLevelPercent] = useState(0);
     const [ammoPercent, setAmmoPercent] = useState(100);
     const isRunningRef = useRef(isRunning);
     const isChrouchingRef = useRef(isChrouching);
@@ -481,11 +486,23 @@ export default function ThreeScene({ }) {
     const hittablesRef = useRef<THREE.Object3D[]>([]);
     const onRotate = useRef((_: boolean) => { })
 
+    // Menünün görünürlük durumu (Başlangıçta menü açık)
+    const [isMenuVisible, setIsMenuVisible] = useState(false);
+
     function FixRotation(silent: boolean | undefined = false) {
         setForceToRotate(getInitialOrientation());
         updateViewportVars(silent)
         onWindowResize()
         onRotate.current(getInitialOrientation())
+    }
+
+    function Reset() {
+        SceneManager.base?.Reset()
+        setAmmoPercent(100)
+        setHealthPercent(100)
+        setNextLevelPercent(0)
+        setNextLevel(0)
+        PlayersToBases()
     }
 
     useEffect(() => {
@@ -494,6 +511,11 @@ export default function ThreeScene({ }) {
         }, 1000);
     }, [windowSize]);
     useEffect(() => { balanceRef.current = balance; }, [balance]);
+    useEffect(() => {
+        if (healthPercent <= 0) {
+            Reset()
+        };
+    }, [healthPercent]);
     useEffect(() => { isRunningRef.current = isRunning; }, [isRunning]);
     useEffect(() => { isChrouchingRef.current = isChrouching; }, [isChrouching]);
     // useEffect ile component yüklendiğinde (mount) ve kaldırıldığında (unmount) çalışacak kodu belirliyoruz.
@@ -607,7 +629,6 @@ export default function ThreeScene({ }) {
         camera.position.set(-1.03, 1.3, -1.2);
         const renderer = new THREE.WebGLRenderer({
             antialias: false,
-            // alpha: true 
         });
         rendererRef.current = renderer;
         renderer.setClearColor(0x000000, 0);
@@ -630,60 +651,6 @@ export default function ThreeScene({ }) {
         // TODO: why initial state only fetching via callback??
         onRotate.current(getInitialOrientation())
 
-        const params = {
-            posX: camera.position.x,
-            posY: camera.position.y,
-            posZ: camera.position.z,
-            rotX: camera.rotation.x,
-            rotY: camera.rotation.y,
-            rotZ: camera.rotation.z,
-
-            rootX: 0,
-            rootY: 0,
-            rootZ: 0,
-        }
-
-        // GUI setup
-        let gui: GUI | null = null;
-        if (process.env.NODE_ENV === 'development' && false) {
-            gui = new GUI({ width: 300 });
-            gui.closed = true;
-            const camFolder = gui.addFolder('Camera')
-            // 2) controller’ları “params” objesine bağla ve onChange ile kamerayı güncelle
-
-            camFolder.add(params, 'posX', -10, 10, 0.01).name('Pos X')
-                .onChange(v => { camera.position.x = v }).listen()
-
-            camFolder.add(params, 'posY', -10, 10, 0.01).name('Pos Y')
-                .onChange(v => { camera.position.y = v }).listen()
-
-            camFolder.add(params, 'posZ', -10, 10, 0.01).name('Pos Z')
-                .onChange(v => { camera.position.z = v }).listen()
-
-            camFolder.add(params, 'rotX', -Math.PI, Math.PI, 0.01).name('Rot X')
-                .onChange(v => { camera.rotation.x = v }).listen()
-
-            camFolder.add(params, 'rotY', -Math.PI, Math.PI, 0.01).name('Rot Y')
-                .onChange(v => { camera.rotation.y = v }).listen()
-
-            camFolder.add(params, 'rotZ', -Math.PI, Math.PI, 0.01).name('Rot Z')
-                .onChange(v => { camera.rotation.z = v }).listen()
-
-            var Test = gui.addFolder('Test')
-
-            // Test.add(rifleOffset, 'x', -360, 360, 0.01).name('rifleOffset x').onChange(v => { rifleOffset.x = v }).listen()
-            // Test.add(rifleOffset, 'y', -360, 360, 0.01).name('rifleOffset y').onChange(v => { rifleOffset.y = v }).listen()
-            // Test.add(rifleOffset, 'z', -360, 360, 0.01).name('rifleOffset z').onChange(v => { rifleOffset.z = v }).listen()
-
-            // Test.add(aimSpineOffset, 'x', -360, 360, 0.01).name('aimSpineOffset x').onChange(v => { aimSpineOffset.x = v }).listen()
-            // Test.add(aimSpineOffset, 'y', -360, 360, 0.01).name('aimSpineOffset y').onChange(v => { aimSpineOffset.y = v }).listen()
-            // Test.add(aimSpineOffset, 'z', -360, 360, 0.01).name('aimSpineOffset z').onChange(v => { aimSpineOffset.z = v }).listen()
-
-            // Test.add(riflePositionOffset, 'x', -10, 10, 0.01).name('riflePositionOffset x').onChange(v => { riflePositionOffset.x = v }).listen()
-            // Test.add(riflePositionOffset, 'y', -10, 10, 0.01).name('riflePositionOffset y').onChange(v => { riflePositionOffset.y = v }).listen()
-            // Test.add(riflePositionOffset, 'z', -10, 10, 0.01).name('riflePositionOffset z').onChange(v => { riflePositionOffset.z = v }).listen()
-        }
-
         instance.current!.initialize().then(() => {
             PlayersToBases()
             // AddTexture(scene)
@@ -692,6 +659,20 @@ export default function ThreeScene({ }) {
                 gltf => {
                     scene.add(gltf.scene);
                     SceneManager.base = new Base(scene, instance.current!.player, hittablesRef, { setHealthPercent })
+                    instance.current!.shield = new Shield(scene.getObjectByName("Shield") as THREE.Object3D, instance.current!.player)
+                    SceneManager.base.onTakeCell = () => {
+                        setAmmoPercent(prev => {
+                            return Math.min(100, prev + 20)
+                        })
+                        setNextLevelPercent(prev => {
+                            const val = Math.min(100, prev + 10)
+                            if (val == 100) {
+                                setIsMenuVisible(true)
+                            }
+                            return val
+                        })
+                        SceneManager.numberEffectController.Flash()
+                    }
                     // Model veya sahne yüklenirken hedef objeyi ekle:
                     hittablesRef.current.push(SceneManager.base.targetBox); // targetBox zaten referansın var
 
@@ -700,7 +681,7 @@ export default function ThreeScene({ }) {
                     // ammoAnimationMixer = new THREE.AnimationMixer(ammo);
                     // const action = ammoAnimationMixer.clipAction(gltf.animations.find((clip: any) => clip.name === 'Ammo_Idle')!);
                     // action.play();
-                    animationBag.register(ammo, gltf.animations.find((clip: any) => clip.name === 'Ammo_Idle'))
+                    SceneManager.animationBag.register(ammo, gltf.animations.find((clip: any) => clip.name === 'Ammo_Idle'))
                     const area5 = gltf.scene.getObjectByName("5CoinFloor") as THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial, THREE.Object3DEventMap>
                     perkAmmo5 = new PerkArea(scene, area5,
                         [
@@ -760,7 +741,7 @@ export default function ThreeScene({ }) {
                         scene,
                     );
 
-                    SceneManager.missile.isActive = true
+                    SceneManager.missile.isActive = isMissileActive
                     // --- Yörünge Çizgisini Ekleme (İsteğe Bağlı) ---
                     SceneManager.missile.createTrajectoryLine(
                         sourcePos,
@@ -780,7 +761,7 @@ export default function ThreeScene({ }) {
                                 // health bar debug
                                 setHealthPercent(prev => {
                                     if (prev - SceneManager.missile!.damage <= 0) {
-                                        window.location.reload()
+                                        // window.location.reload()
                                         return 0
                                     }
                                     return prev - SceneManager.missile!.damage
@@ -788,6 +769,14 @@ export default function ThreeScene({ }) {
                             }
                         }
                     )
+                },
+                () => ////console.log(`Loading: ${(xhr.loaded / xhr.total * 100).toFixed(1)}%`),
+                    (err: any) => console.error('Error loading model:', err));
+            new GLTFLoader().load(
+                `${BASE}/models/base.glb`,
+                gltf => {
+                    scene.add(gltf.scene);
+                    SceneManager.animationBag.register(gltf.scene, gltf.animations[0])
 
                 },
                 () => ////console.log(`Loading: ${(xhr.loaded / xhr.total * 100).toFixed(1)}%`),
@@ -799,29 +788,17 @@ export default function ThreeScene({ }) {
             const slowDownFactor = 1;
             deltaTime = clock.getDelta() * slowDownFactor;
 
-            params.posX = camera.position.x;
-            params.posY = camera.position.y;
-            params.posZ = camera.position.z;
-            params.rotX = camera.rotation.x;
-            params.rotY = camera.rotation.y;
-            params.rotZ = camera.rotation.z;
-
             if (instance.current?.player) {
                 //utils.LookAtCustom(player, aimTarget.position, { x: true, y: true, z: true })
                 // Yeni bir Vector3 oluştur, içine target'in dünya pozisyonunu yaz
                 const worldTarget = new THREE.Vector3();
                 instance.current?.aimTarget.getWorldPosition(worldTarget);
                 utils.lookAtYawOnly(instance.current?.player, worldTarget)
-                // player.rotation.x = params.rootX;
-                // player.rotation.y = params.rootY;
-                // player.rotation.z = params.rootZ;
 
                 SceneManager.perkTurret15?.update(balanceRef.current)
                 perkAmmo5?.update(balanceRef.current)
-            }
 
-            if (process.env.NODE_ENV === 'development' && gui) {
-                gui.updateDisplay();
+                instance.current.shield?.update()
             }
 
             instance.current?.onAnimate()
@@ -834,13 +811,17 @@ export default function ThreeScene({ }) {
             // ammoAnimationMixer?.update(deltaTime)
 
             SceneManager.base?.update(instance.current?.player?.worldPosition())
-            animationBag.update(deltaTime)
+            SceneManager.animationBag.update(deltaTime)
             renderer?.render(scene, camera);
             requestAnimationFrame(animate);
         };
 
         // 2) listener’ı ekle
         window.addEventListener('resize', FixRotation);
+
+        document.addEventListener("keydown", onRunButtonDown);
+
+        document.addEventListener("keyup", onRunButtonUp);
 
         // 3) ilk boyutlandırmayı da yap
         onWindowResize();
@@ -851,9 +832,7 @@ export default function ThreeScene({ }) {
             window.removeEventListener('resize', FixRotation);
             window.visualViewport?.removeEventListener('resize', onWindowResize);
             window.visualViewport?.removeEventListener('scroll', onWindowResize);
-            if (process.env.NODE_ENV === 'development' && gui) {
-                gui.destroy();
-            }
+
             //controls.dispose();
 
             instance.current?.onClear()
@@ -1037,7 +1016,22 @@ export default function ThreeScene({ }) {
         }
     }, []);
 
-    function HealthBar({ targetHealthPercent, side, color, title, titleColor }) {
+    function onRunButtonUp(e?: KeyboardEvent) {
+        if (e == null || (e.key === "Shift" && !e.repeat)) {
+            setIsRunning(false);
+            fovController.push(60, .05);
+        }
+    }
+
+    function onRunButtonDown(e?: KeyboardEvent) {
+        if (e == null || (e.key === "Shift" && !e.repeat)) {
+            console.log("Shift basıldı (sadece bir kez)!");
+            setIsRunning(true);
+            fovController.push(75, .05);
+        }
+    }
+
+    function HealthBar({ targetHealthPercent, side, color, title, titleColor, titleSize }) {
         return <button
             style={{
                 position: 'fixed',
@@ -1061,11 +1055,23 @@ export default function ThreeScene({ }) {
 
             }}
         >
+            <div style={{
+                position: "absolute",
+                fontFamily: !titleSize ? "monospace" : undefined,
+                fontSize: titleSize ?? 'calc(var(--vvh) * 0.05)',
+                paddingLeft: "7%",
+
+                top: "50%", /* Üst kenarı ortanın %50'sine getir */
+                transform: "translateY(-50%)", /* Kendi yüksekliğinin %50'si kadar yukarı kaydır */
+                boxSizing: 'border-box',
+
+
+            }}>{title}</div>
             <div
                 style={{
                     backgroundColor: color == undefined ? 'limegreen' : color,
                     display: "flex",
-                    width: targetHealthPercent == 0 ? "0px" : `${targetHealthPercent}%`,
+                    width: `${targetHealthPercent}%`,
                     fontFamily: "monospace",
                     fontSize: 'calc(var(--vvh) * 0.05)',
                     color: titleColor,
@@ -1077,9 +1083,7 @@ export default function ThreeScene({ }) {
                     boxSizing: 'border-box',
                     paddingLeft: targetHealthPercent > 0 ? "7%" : undefined,
                 }}
-            >
-                {targetHealthPercent > 0 && title}
-            </div>
+            />
         </button>
     }
 
@@ -1157,6 +1161,30 @@ export default function ThreeScene({ }) {
             <i className="fa-solid fa-coins" style={{ color: "limegreen", }}></i> {balance}
         </div>
     }
+    const handleSelect = useCallback(({ d, index }) => {
+        setNextLevel((prev) => {
+            return prev + 1
+        })
+        // alert(JSON.stringify(index));
+        if (index == 2) {
+            instance.current?.shield.setActive(true);
+        }
+        setIsMenuVisible(false);
+    }, [instance.current]);
+
+    const levelUpMenu = useMemo(() => (
+        <LevelUpMenu
+            onSelect={handleSelect}
+            style={{
+                margin: 0,
+                width: forceRotate ? 'var(--vvw)' : 'var(--vvw)',
+                height: forceRotate ? 'var(--vvh)' : 'var(--vvh)',
+                zIndex: 11,
+                transform: 'translateZ(0px)',
+            }}
+        />
+    ), [forceRotate, handleSelect, instance.current]);
+
     // 3,44
     return <div
         // style={{ position: 'fixed', width: '100vw', height: '100vh', overflow: 'hidden' }}
@@ -1173,6 +1201,14 @@ export default function ThreeScene({ }) {
             transformOrigin: forceRotate ? "0% 100%" : undefined
         }}
     >
+        <SceneManager.numberEffectController.Frame style={{
+            margin: 0, // Varsayılan boşluklar kaldırıldı
+            width: forceRotate ? 'var(--vvw)' : "var(--vvw)'",
+            height: forceRotate ? 'var(--vvh)' : "var(--vvh)'",
+            transform: `translateZ(0px)`,
+            background: 'transparent',
+            pointerEvents: 'none',
+        }} />
         <div style={{
             position: 'absolute',
             /* Görünen alanın tam ortası */
@@ -1222,14 +1258,10 @@ export default function ThreeScene({ }) {
 
             }}
             onPointerDown={() => {
-                setIsRunning(true)
-                ////console.log(cameraRef.current?.fov)
-                fovController.push(75, .05)
-
+                onRunButtonDown();
             }}
             onPointerUp={() => {
-                setIsRunning(false)
-                fovController.push(60, .05)
+                onRunButtonUp();
             }}
         >
             💨
@@ -1321,7 +1353,8 @@ export default function ThreeScene({ }) {
 
             }}
             onPointerUp={() => {
-                window.location.reload()
+                Reset()
+                // window.location.reload()
                 // Auth.signInWithGoogle().then((user) => {
                 //     alert(user.uid)
                 // })
@@ -1361,10 +1394,12 @@ export default function ThreeScene({ }) {
         >
             ⚙
         </button>
-        <HealthBar targetHealthPercent={healthPercent} side="left" title="+" titleColor="white" />
-        {/* <HealthBar targetHealthPercent={opponentHealthPercent} side="right" color="#ffffffff" title="o" titleColor="darkrey"/> */}
+        <HealthBar targetHealthPercent={healthPercent} side="left" title="+" titleColor="white" color={undefined} titleSize={undefined} />
+        <HealthBar targetHealthPercent={nextLevelPercent} side="right" color="#d07c0dff" title={`LvL ${level.toString()}`} titleColor="darkrey" titleSize={'calc(var(--vvh) * 0.04)'} />
         <AmmoBar targetPercent={ammoPercent} side="left" color={undefined} />
         <div ref={mountRef} style={{ width: '100%', height: '100%' }} />
+        {isMenuVisible && levelUpMenu}
+
         <Dashboard></Dashboard>
     </div>
 }
