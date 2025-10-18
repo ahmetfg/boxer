@@ -23,6 +23,7 @@ export class SceneManager {
     static missile: utils.Missile | undefined;
     static animationBag: AnimationBag = new AnimationBag();
     static numberEffectController = new Controller()
+    static pause = false
 
     private constructor() { }
 

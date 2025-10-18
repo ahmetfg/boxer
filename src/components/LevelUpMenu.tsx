@@ -1,6 +1,6 @@
-import React from "react";
+import React, { useEffect, useRef } from "react";
 import { SceneManager } from "./SceneManager.tsx";
-
+import { GlowEffectPure } from "./RayEffect.tsx";
 // Reusable SelectionMenu bileşeninin tanımı, App içinde yer alıyor
 const SelectionMenu = ({ allData, onSelect, style }) => {
     // --- 1. Ana Stiller ---
@@ -29,9 +29,9 @@ const SelectionMenu = ({ allData, onSelect, style }) => {
         bottom: '-5px',
         right: '-5px',
 
-        minWidth: '85%',
-        maxWidth: '95%',
-        minHeight: '110px',
+        minWidth: '55%',
+        maxWidth: '85%',
+        // minHeight: '110px',
 
         backgroundColor: '#ffffff',
         border: '5px solid #000000',
@@ -44,13 +44,13 @@ const SelectionMenu = ({ allData, onSelect, style }) => {
     };
 
     const newBoxStyle = { // 1. KUTU (SOLDAN İLK KUTUCUK)
-        width: '32%',
+        width: '22%',
 
         // Top, Left ve Bottom'dan -5px taşırma
         marginLeft: '-5px',
         marginTop: '-5px',
         marginBottom: '-5px',
-
+        fontSize:"26px",
         backgroundColor: 'green',
         border: '5px solid #000000',
         flexShrink: 0,
@@ -68,15 +68,21 @@ const SelectionMenu = ({ allData, onSelect, style }) => {
         paddingLeft: '10px',
         paddingRight: '15px',
         paddingTop: '10px',
+        paddingBottom: '10px',
     };
 
     const singleTextStyle = {
-        fontSize: '16px',
+        // fontSize: '16px',
+        fontSize: 'calc(var(--vvh) * 0.03)',
+
     };
 
     const upperTextStyle = {
         ...singleTextStyle,
-        fontSize: '24px',
+        // fontSize: '24px',
+        // fontSize: '24px',
+        fontSize: 'calc(var(--vvh) * 0.04)',
+
         fontWeight: 900,
         flexShrink: 0,
     };
@@ -111,7 +117,7 @@ const SelectionMenu = ({ allData, onSelect, style }) => {
                 <div style={subItemStyle}>
 
                     {/* 1. Yeni Siyah Kenarlıklı Kutu (Yeşil) */}
-                    <div style={newBoxStyle}></div>
+                    <div style={newBoxStyle}>➔</div>
 
                     {/* 2. Yazı Konteyneri */}
                     <div style={textContainerStyle}>
@@ -147,7 +153,17 @@ const menuData = [
 
 // Ana bileşen (App) - Uygulamanın ana sayfasını simgeler
 const Controller = ({ onSelect, style }) => {
-
+    // GlowEffectPure component'ine erişmek için useRef kullanılır.
+    // const glowRef = useRef<GlowEffectPure>(null);
+    
+    // // Bileşen yüklendiğinde efekti otomatik olarak başlat
+    // useEffect(() => {
+    //     // Bileşen render edildikten sonra ref'in hazır olduğundan emin ol
+    //     if (glowRef.current) {
+    //         // Efekti görünür hale getir
+    //         glowRef.current?.fadeIn();
+    //     }
+    // }, []);
     // Seçim yapıldığında SelectionMenu tarafından çağrılacak callback fonksiyonu
     const handleSelection = (selectedIndex) => {
 

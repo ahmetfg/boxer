@@ -12,6 +12,8 @@ import { Base } from './Base.tsx';
 import { PerkArea } from './PerkArea.tsx';
 import { Shield } from './Shield.tsx';
 import LevelUpMenu from './LevelUpMenu.tsx';
+import GlowEffectPure from './RayEffect.tsx';
+import { EmojiRain } from './EmojiEffect.tsx';
 const BASE = process.env.PUBLIC_URL;  // → "/boxer"
 
 export var deltaTime: number;
@@ -40,6 +42,7 @@ const isMissileActive = true
 
 // Kaynak (Atan oyuncu)
 const sourcePos = new THREE.Vector3(0, 1.5, 7);
+const clock = new THREE.Clock();
 
 export class Player {
     shield: Shield;
@@ -472,9 +475,9 @@ export default function ThreeScene({ }) {
     const [crossSize, setCrossize] = useState(.01);
     const [balance, setBalance] = useState(0);
     const [level, setNextLevel] = useState(1);
-    const balanceRef = useRef(balance);
     const [healthPercent, setHealthPercent] = useState(100);
     const [nextLevelPercent, setNextLevelPercent] = useState(0);
+    const balanceRef = useRef(balance);
     const [ammoPercent, setAmmoPercent] = useState(100);
     const isRunningRef = useRef(isRunning);
     const isChrouchingRef = useRef(isChrouching);
@@ -501,8 +504,23 @@ export default function ThreeScene({ }) {
         setAmmoPercent(100)
         setHealthPercent(100)
         setNextLevelPercent(0)
-        setNextLevel(0)
+        setNextLevel(1)
         PlayersToBases()
+        instance.current?.shield.setActive(false)
+    }
+
+    function onLevelUp() {
+        pause()
+        setIsMenuVisible(true)
+    }
+
+    const play = () => {
+        SceneManager.pause = false
+        animate()
+    }
+
+    const pause = () => {
+        SceneManager.pause = true
     }
 
     useEffect(() => {
@@ -642,8 +660,6 @@ export default function ThreeScene({ }) {
         dirLight.position.x = 0;
         scene.add(dirLight);
 
-        const clock = new THREE.Clock();
-
         instance.current = new Player(scene, renderer, camera, false, forceRotate, onRotate)
         instance.current.isRunningRef = isRunningRef
         instance.current.isChrouchingRef = isChrouchingRef
@@ -667,7 +683,7 @@ export default function ThreeScene({ }) {
                         setNextLevelPercent(prev => {
                             const val = Math.min(100, prev + 10)
                             if (val == 100) {
-                                setIsMenuVisible(true)
+                                onLevelUp()
                             }
                             return val
                         })
@@ -769,6 +785,7 @@ export default function ThreeScene({ }) {
                             }
                         }
                     )
+                    animate();
                 },
                 () => ////console.log(`Loading: ${(xhr.loaded / xhr.total * 100).toFixed(1)}%`),
                     (err: any) => console.error('Error loading model:', err));
@@ -784,38 +801,6 @@ export default function ThreeScene({ }) {
             // ////console.log("init done")
         }).catch(() => { })
 
-        const animate = () => {
-            const slowDownFactor = 1;
-            deltaTime = clock.getDelta() * slowDownFactor;
-
-            if (instance.current?.player) {
-                //utils.LookAtCustom(player, aimTarget.position, { x: true, y: true, z: true })
-                // Yeni bir Vector3 oluştur, içine target'in dünya pozisyonunu yaz
-                const worldTarget = new THREE.Vector3();
-                instance.current?.aimTarget.getWorldPosition(worldTarget);
-                utils.lookAtYawOnly(instance.current?.player, worldTarget)
-
-                SceneManager.perkTurret15?.update(balanceRef.current)
-                perkAmmo5?.update(balanceRef.current)
-
-                instance.current.shield?.update()
-            }
-
-            instance.current?.onAnimate()
-            opponent.current?.onAnimate()
-            fovController.update()
-            turret?.update()
-
-            // Füzenin konumunu güncelle
-            SceneManager.missile?.update(deltaTime);
-            // ammoAnimationMixer?.update(deltaTime)
-
-            SceneManager.base?.update(instance.current?.player?.worldPosition())
-            SceneManager.animationBag.update(deltaTime)
-            renderer?.render(scene, camera);
-            requestAnimationFrame(animate);
-        };
-
         // 2) listener’ı ekle
         window.addEventListener('resize', FixRotation);
 
@@ -825,7 +810,6 @@ export default function ThreeScene({ }) {
 
         // 3) ilk boyutlandırmayı da yap
         onWindowResize();
-        animate();
 
         // Cleanup on unmount
         return () => {
@@ -850,6 +834,41 @@ export default function ThreeScene({ }) {
         };
         // }
     }, []);
+
+    const animate = useCallback(() => {
+        if (!SceneManager.pause && rendererRef.current && cameraRef.current && sceneRef.current) {
+            const slowDownFactor = 1;
+            deltaTime = clock.getDelta() * slowDownFactor;
+
+            if (instance.current?.player) {
+                //utils.LookAtCustom(player, aimTarget.position, { x: true, y: true, z: true })
+                // Yeni bir Vector3 oluştur, içine target'in dünya pozisyonunu yaz
+                const worldTarget = new THREE.Vector3();
+                instance.current?.aimTarget.getWorldPosition(worldTarget);
+                utils.lookAtYawOnly(instance.current?.player, worldTarget)
+
+                SceneManager.perkTurret15?.update(balanceRef.current)
+                perkAmmo5?.update(balanceRef.current)
+
+                instance.current.shield?.update()
+            }
+
+            instance.current!.onAnimate()
+            fovController.update()
+            turret?.update()
+
+            // Füzenin konumunu güncelle
+            SceneManager.missile?.update(deltaTime);
+            // ammoAnimationMixer?.update(deltaTime)
+
+            SceneManager.base?.update(instance.current?.player?.worldPosition())
+            SceneManager.animationBag.update(deltaTime)
+
+            rendererRef.current?.render(sceneRef.current, cameraRef.current);
+            requestAnimationFrame(animate);
+            // console.log("animating")
+        }
+    }, [instance.current]);
 
     // 1) resize handler
     const onWindowResize = () => {
@@ -1165,24 +1184,42 @@ export default function ThreeScene({ }) {
         setNextLevel((prev) => {
             return prev + 1
         })
-        // alert(JSON.stringify(index));
         if (index == 2) {
             instance.current?.shield.setActive(true);
         }
         setIsMenuVisible(false);
+        setNextLevelPercent(0)
+        play()
+
     }, [instance.current]);
 
     const levelUpMenu = useMemo(() => (
-        <LevelUpMenu
-            onSelect={handleSelect}
-            style={{
-                margin: 0,
-                width: forceRotate ? 'var(--vvw)' : 'var(--vvw)',
-                height: forceRotate ? 'var(--vvh)' : 'var(--vvh)',
-                zIndex: 11,
-                transform: 'translateZ(0px)',
-            }}
-        />
+        <div style={{
+            position: "fixed",
+            width: "100%",
+            height: "100%",
+            top: '0%',
+            left: '0%',
+            backgroundColor: "#2900b152",
+            transform: `translateZ(0px)`,
+            zIndex: 11,
+        }}>
+            <LevelUpMenu
+                onSelect={handleSelect}
+                style={{
+                    margin: 0,
+                    width: "70%",
+                    height: "70%",
+                    transform: `translate(20%, 20%)`,
+                    zIndex: 10,
+                    border: '5px solid black',
+
+                }}
+            />
+            <EmojiRain />
+
+
+        </div>
     ), [forceRotate, handleSelect, instance.current]);
 
     // 3,44
@@ -1191,8 +1228,8 @@ export default function ThreeScene({ }) {
         style={{
             position: 'fixed',
             /* var(--vvw) ve var(--vvh) JS’den güncellenen gerçek ölçüler */
-            width: forceRotate ? 'var(--vvw)' : "var(--vvw)'",
-            height: forceRotate ? 'var(--vvh)' : "var(--vvh)'",
+            width: "var(--vvw)'",
+            height: "var(--vvh)'",
             overflow: 'hidden',
             backgroundColor: "#ffffff",
             transform: forceRotate ? "translate(0px,calc(var(--vvh)*-1)) rotate(90deg)" : undefined, //144px
@@ -1201,14 +1238,7 @@ export default function ThreeScene({ }) {
             transformOrigin: forceRotate ? "0% 100%" : undefined
         }}
     >
-        <SceneManager.numberEffectController.Frame style={{
-            margin: 0, // Varsayılan boşluklar kaldırıldı
-            width: forceRotate ? 'var(--vvw)' : "var(--vvw)'",
-            height: forceRotate ? 'var(--vvh)' : "var(--vvh)'",
-            transform: `translateZ(0px)`,
-            background: 'transparent',
-            pointerEvents: 'none',
-        }} />
+
         <div style={{
             position: 'absolute',
             /* Görünen alanın tam ortası */
@@ -1233,7 +1263,6 @@ export default function ThreeScene({ }) {
             left: 'calc(var(--vvw) * 0.05 + env(safe-area-inset-left))',
             zIndex: 10,
             transform: `translateZ(0px)`,
-
         }}>
             <Joystick onChange={setJoystickCoords} forceRotate={forceRotate} />
         </div>
@@ -1353,8 +1382,8 @@ export default function ThreeScene({ }) {
 
             }}
             onPointerUp={() => {
-                Reset()
-                // window.location.reload()
+                // Reset()
+                window.location.reload()
                 // Auth.signInWithGoogle().then((user) => {
                 //     alert(user.uid)
                 // })
@@ -1397,6 +1426,15 @@ export default function ThreeScene({ }) {
         <HealthBar targetHealthPercent={healthPercent} side="left" title="+" titleColor="white" color={undefined} titleSize={undefined} />
         <HealthBar targetHealthPercent={nextLevelPercent} side="right" color="#d07c0dff" title={`LvL ${level.toString()}`} titleColor="darkrey" titleSize={'calc(var(--vvh) * 0.04)'} />
         <AmmoBar targetPercent={ammoPercent} side="left" color={undefined} />
+        <SceneManager.numberEffectController.Frame style={{
+            margin: 0, // Varsayılan boşluklar kaldırıldı
+            width: "100%",
+            height: "100%",
+            background: 'transparent',
+            pointerEvents: 'none',
+            transform: `translateZ(0px)`,
+            position: "fixed"
+        }} />
         <div ref={mountRef} style={{ width: '100%', height: '100%' }} />
         {isMenuVisible && levelUpMenu}
 
