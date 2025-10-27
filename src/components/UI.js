@@ -219,7 +219,7 @@ export class UI {
         UI.resetBtn = UI.el('button', {
             position: 'fixed',
             left: `calc(var(--vvw) * 0.05 + env(safe-area-inset-left) * .1)`,
-            top: `calc(var(--vvh) * 0.05 + env(safe-area-inset-top))`,
+            top: `calc(var(--vvh) * 0.05 )`,
             width: `calc(var(--vvh) * 0.08)`,
             height: `calc(var(--vvh) * 0.08)`,
             padding: 0,
@@ -244,15 +244,9 @@ export class UI {
         UI.healthBarBtn = UI.el('button', {
             position: 'fixed',
             left: 'calc(var(--vvw) * 0.05 + var(--vvh) * 0.08 + 10px + env(safe-area-inset-left) * .1)',
-            top: 'calc(var(--vvh) * 0.05 + env(safe-area-inset-top))',
-            // width: 'calc(var(--vvh) * 0.38)',
+            top: 'calc(var(--vvh) * 0.05 )',
             width: coverMax(`calc(var(--vvh) * 0.38)`, healthBarMax),
-            // height: 'calc(var(--vvh) * 0.08)',
-            // height: `min(calc(var(--vvh) * 0.08), ${138/(38/8)}px)`,
-            // height: cover("calc(var(--vvh) * 0.08)",238/(38/8)),
             height: coverMax(`calc(var(--vvh) * 0.08)`, healthBarMax),
-            // borderRadius: 'calc(var(--vvh) * 0.02 + 2px)',
-            // borderRadius:   cover("calc(var(--vvh) * 0.02 + 2px)",150/(38/8)),
             borderRadius: coverMax(`calc(var(--vvh) * 0.02 + 2px)`, healthBarMax),
             background: 'color-mix(in srgb, black 50%, transparent)',
             color: '#fff', border: 'none',
@@ -284,7 +278,7 @@ export class UI {
         const rightBar = UI.el('button', {
             position: 'fixed',
             right: 'calc(var(--vvw) * 0.05 + var(--vvh) * 0.08 + 10px + env(safe-area-inset-left) * .1)',
-            top: 'calc(var(--vvh) * 0.05 + env(safe-area-inset-top))',
+            top: 'calc(var(--vvh) * 0.05 )',
             width: 'calc(var(--vvh) * 0.38)',
             height: 'calc(var(--vvh) * 0.08)',
             borderRadius: 'calc(var(--vvh) * 0.02 + 2px)',
@@ -312,7 +306,7 @@ export class UI {
         UI.ammoBarBtn = UI.el('button', {
             position: 'fixed',
             left: 'calc(var(--vvw) * 0.05 + var(--vvh) * 0.08 + 10px + env(safe-area-inset-left) * .1)',
-            top: coverMax('calc(var(--vvh) * 0.135 + env(safe-area-inset-top))', healthBarMax),
+            top: coverMax('calc(var(--vvh) * 0.135)', healthBarMax),
             width: coverMax('calc(var(--vvh) * 0.38)', healthBarMax),
             // width: 'calc(var(--vvh) * 0.38)',
             height: coverMax('calc(var(--vvh) * 0.03)', healthBarMax),
@@ -333,7 +327,7 @@ export class UI {
         // Dashboard
         UI.dashboardDiv = UI.el('div', {
             position: 'fixed',
-            top: 'calc(var(--vvh) * 0.05 + env(safe-area-inset-top))',
+            top: 'calc(var(--vvh) * 0.05)',
             left: '50%',
             display: 'flex', justifyContent: 'center', alignItems: 'center',
             transform: 'translateX(-50%) translateZ(0px)',
@@ -350,7 +344,7 @@ export class UI {
 
         const statParent = UI.el('div', {
             position: 'fixed',
-            top: 'calc(var(--vvh) * 0.135 + env(safe-area-inset-top))',
+            top: 'calc(var(--vvh) * 0.135 )',
             right: 'calc(var(--vvw) * 0.05 + var(--vvh) * 0.08 + 10px + env(safe-area-inset-right) * .1)',
             display: 'flex', justifyContent: 'center', alignItems: 'center',
             height: 'calc(var(--vvh) * 0.05)', fontSize: 'calc(var(--vvh) * 0.03)',

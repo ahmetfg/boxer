@@ -12,7 +12,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "deploy:docs": "rm -rf docs && npm run build && cp -r dist docs && echo \"boxer.lumus.games\" > docs/CNAME && touch docs/.nojekyll && git add docs docs/.nojekyll docs/CNAME && git commit -m \"Deploy via docs folder: güncel build\" || echo \"No changes to commit\" && git push origin main"
   },
   "devDependencies": {
     "vite": "^7.1.12"
