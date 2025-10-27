@@ -44,4 +44,15 @@ git add docs docs/.nojekyll docs/CNAME
 git commit -m "Deploy via docs folder: güncel build"
 git push origin main
 
+# 1. eski docs'ı temizle
+
+rm -rf docs
+npm run build
+cp -r dist docs
+echo "boxer.lumus.games" > docs/CNAME
+touch docs/.nojekyll
+git add docs docs/.nojekyll docs/CNAME
+git commit -m "Deploy via docs folder: güncel build" || echo "No changes to commit"
+git push origin main
+
 */
